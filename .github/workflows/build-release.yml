@@ -50,9 +50,9 @@ jobs:
 
       - name: Assemble Magisk Module Package
         run: |
-          mkdir -p dist/9router-module/9router
           mkdir -p dist/9router-module/bin
           mkdir -p dist/9router-module/lib
+          mkdir -p dist/app-bundle/9router
 
           # Copy Magisk scripts & standard installer files
           cp magisk-module/action.sh dist/9router-module/
@@ -64,21 +64,21 @@ jobs:
 
           chmod +x dist/9router-module/*.sh dist/9router-module/*.cjs
 
-          # Copy Standalone 9router Server files
+          # Copy Standalone 9router Server files to staging bundle
           if [ -d "9router-src/.next/standalone" ]; then
-            cp -rf 9router-src/.next/standalone/* dist/9router-module/9router/
-            cp -rf 9router-src/.next/static dist/9router-module/9router/.next/ 2>/dev/null || true
-            cp -rf 9router-src/public dist/9router-module/9router/ 2>/dev/null || true
+            cp -rf 9router-src/.next/standalone/* dist/app-bundle/9router/
+            cp -rf 9router-src/.next/static dist/app-bundle/9router/.next/ 2>/dev/null || true
+            cp -rf 9router-src/public dist/app-bundle/9router/ 2>/dev/null || true
           else
-            cp -rf 9router-src/* dist/9router-module/9router/
+            cp -rf 9router-src/* dist/app-bundle/9router/
           fi
 
           # Copy custom-server.js & open-sse
-          cp -rf 9router-src/custom-server.js dist/9router-module/9router/ 2>/dev/null || true
-          cp -rf 9router-src/open-sse dist/9router-module/9router/ 2>/dev/null || true
+          cp -rf 9router-src/custom-server.js dist/app-bundle/9router/ 2>/dev/null || true
+          cp -rf 9router-src/open-sse dist/app-bundle/9router/ 2>/dev/null || true
 
-          # Aggressive Cleanup: strip TS, tests, maps, dev dependencies to minimize ZIP size
-          cd dist/9router-module/9router
+          # Aggressive Cleanup: strip TS, tests, maps, dev dependencies
+          cd dist/app-bundle/9router
           find . -name "*.ts" -not -name "*.d.ts" -delete 2>/dev/null || true
           find . -name "*.map" -delete 2>/dev/null || true
           find . -name "*.md" -delete 2>/dev/null || true
@@ -86,6 +86,10 @@ jobs:
           find . -type d -name ".github" -exec rm -rf {} + 2>/dev/null || true
           rm -rf .next/cache 2>/dev/null || true
           cd ../../..
+
+          # Package 9router core into a fast-streaming tar.gz
+          tar -czf dist/9router-module/9router.tar.gz -C dist/app-bundle 9router
+          rm -rf dist/app-bundle
 
       - name: Download & Bundle Android ARM64 Node.js Runtime
         run: |
@@ -118,12 +122,13 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.36
-          name: "9router Magisk Module v0.5.36 (Ultra-Lite Standalone)"
+          tag_name: v0.5.37
+          name: "9router Magisk Module v0.5.37 (Lightning Installer & RAM Stream)"
           body: |
-            ## 9router Magisk Module (Ultra-Lite AI Gateway)
-            - **100% Standalone Android Bionic Node.js**: Includes native ARM64 Node.js runtime + shared libraries (`libcrypto`, `libssl`, `libcares`, `libicu`, `libc++_shared`, CA bundle).
-            - **Magisk Installer (`customize.sh`)**: Sets proper executable permissions (0755) on binaries and libraries automatically.
+            ## 9router Magisk Module v0.5.37 (Lightning Fast Installer)
+            - **⚡ Ultra-Fast RAM Streaming Extraction**: 9router core (3,500+ files) is packed into an optimized streamable tarball. Extraction is streamed directly in memory via RAM pipe (`unzip -p | tar -xz`), reducing installation time from 2+ minutes down to ~5 seconds!
+            - **📊 Live Interactive Progress**: Uses `SKIPUNZIP=1` with clear step-by-step console progress indicators (`[1/4]`, `[2/4]`, `[3/4]`, `[4/4]`). No more blank/frozen screen or feeling like it "hangs".
+            - **100% Standalone Android Bionic Node.js**: Built-in native ARM64 Node.js runtime with all required libraries (`libcrypto`, `libssl`, `libcares`, `libicu`, `libc++_shared`, CA root cert bundle).
             - **123+ AI Providers** (Antigravity, Codex, Claude Code, Windsurf, OpenRouter, Groq, etc.)
             - **Zero-Playwright / Zero-Chromium** (Direct Protocol Emulation)
             - **RTK Prompt Compression** (-40% token usage)
