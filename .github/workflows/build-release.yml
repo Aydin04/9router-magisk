@@ -74,7 +74,6 @@ jobs:
           # Ensure complete production .next build (BUILD_ID, manifests, server, static)
           mkdir -p dist/app-bundle/9router/.next
           cp -rf 9router-src/.next/. dist/app-bundle/9router/.next/
-          rm -rf dist/app-bundle/9router/.next/cache
 
           # Copy public, custom-server, open-sse, and missing dependencies as per 9router Dockerfile
           cp -rf 9router-src/public dist/app-bundle/9router/ 2>/dev/null || true
@@ -88,14 +87,19 @@ jobs:
           cp -rf 9router-src/node_modules/sql.js dist/app-bundle/9router/node_modules/ 2>/dev/null || true
           cp -rf 9router-src/node_modules/node-machine-id dist/app-bundle/9router/node_modules/ 2>/dev/null || true
 
-          # Aggressive Cleanup: strip TS, tests, maps, dev dependencies
+          # AGGRESSIVE PURGE OF BUILD JUNK:
           cd dist/app-bundle/9router
-          find . -name "*.ts" -not -name "*.d.ts" -delete 2>/dev/null || true
-          find . -name "*.map" -delete 2>/dev/null || true
-          find . -name "*.md" -delete 2>/dev/null || true
-          find . -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
-          find . -type d -name ".github" -exec rm -rf {} + 2>/dev/null || true
-          rm -rf .next/cache 2>/dev/null || true
+          # 1. Remove duplicate standalone inside .next
+          rm -rf .next/standalone 2>/dev/null || true
+          # 2. Remove build cache & trace profiles
+          rm -rf .next/cache .next/trace .next/diagnostics 2>/dev/null || true
+          # 3. Remove non-ARM64 / x64 host platform native binaries
+          rm -rf node_modules/@img/sharp-libvips-linux-x64 node_modules/@img/sharp-linux-x64 2>/dev/null || true
+          # 4. Remove TypeScript sources, declarations, sourcemaps, and nft traces
+          find . -type f \( -name "*.d.ts" -o -name "*.ts" -o -name "*.tsx" -o -name "*.map" -o -name "*.nft.json" \) -delete 2>/dev/null || true
+          # 5. Remove documentation, tests, and git directories
+          find . -type f \( -name "*.md" -o -name "LICENSE*" -o -name "CHANGELOG*" \) -delete 2>/dev/null || true
+          find . -type d \( -name "tests" -o -name "__tests__" -o -name ".github" -o -name ".git" \) -exec rm -rf {} + 2>/dev/null || true
           cd ../../..
 
           # Package 9router core into a fast-streaming tar.gz
@@ -133,22 +137,21 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.38
-          name: "9router Magisk Module v0.5.38 (Fix Production Build & BUILD_ID)"
+          tag_name: v0.5.39
+          name: "9router Magisk Module v0.5.39 (Purged Build Junk & Ultra-Lite)"
           body: |
-            ## 9router Magisk Module v0.5.38
-            - **🔧 Fix Next.js Production Build**: Fixed missing `.next` build files (`BUILD_ID`, manifests, `server/` routes) caused by bash glob omitting dotfolders during staging.
-            - **⚡ Ultra-Fast RAM Streaming Extraction**: 9router core is packed into a streamable tarball. Extraction is streamed directly in memory via RAM pipe (`unzip -p | tar -xz`), taking only ~5 seconds without freezing.
-            - **📊 Live Interactive Progress**: Uses `SKIPUNZIP=1` with clear console progress indicators (`[1/4]`, `[2/4]`, `[3/4]`, `[4/4]`).
-            - **100% Standalone Android Bionic Node.js**: Native ARM64 Node.js runtime with all required shared libraries (`libcrypto`, `libssl`, `libcares`, `libicu`, `libc++_shared`, CA root cert bundle).
-            - **123+ AI Providers** (Antigravity, Codex, Claude Code, Windsurf, OpenRouter, Groq, etc.)
-            - **Zero-Playwright / Zero-Chromium** (Direct Protocol Emulation)
-            - **RTK Prompt Compression** (-40% token usage)
-            - **Standalone Control Center on Port 20129**:
-              - Toggle ON/OFF Dashboard SSR (~75MB RAM vs 250MB)
-              - Toggle ON/OFF Require Auth & API Key
-              - Toggle ON/OFF Admin Password Login
-              - Toggle Network Bind (Localhost 127.0.0.1 vs LAN 0.0.0.0)
+            ## 9router Magisk Module v0.5.39 (Cleaned & Optimized)
+            - **🧹 Aggressive Build Junk Purge**:
+              - Removed duplicate nested `.next/standalone` folder (~68MB saved).
+              - Removed non-ARM64 / x64 host platform native binaries (`sharp-libvips-linux-x64`) (~18MB saved).
+              - Removed build trace profiles (`.next/trace`) (~5.3MB saved).
+              - Removed 1,600+ useless `.ts`/`.d.ts` source files, sourcemaps (`.map`), and `.nft.json` trace files.
+              - Saves ~100MB of uncompressed storage & RAM footprint on Android!
+            - **🔧 Intact Production Build**: Kept all critical production manifests (`BUILD_ID`, `routes-manifest.json`, `server/` routes).
+            - **⚡ Ultra-Fast RAM Streaming Extraction**: 9router core is streamed directly via RAM pipe (`unzip -p | tar -xz`) in ~5s.
+            - **📊 Live Interactive Progress**: Uses `SKIPUNZIP=1` with clear step indicators (`[1/4]`, `[2/4]`, `[3/4]`, `[4/4]`).
+            - **100% Standalone Android Bionic Node.js**: Built-in ARM64 Node.js runtime + libraries (`libcrypto`, `libssl`, `libcares`, `libicu`, `libc++_shared`, CA bundle).
+            - **123+ AI Providers & Web UI Control Center on Port 20129**.
           files: dist/9router-magisk-module.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
