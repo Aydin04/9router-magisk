@@ -1,0 +1,121 @@
+name: Build & Release 9router Magisk Module
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - v*
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Ultra-Lite 9router Magisk Bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Expand Virtual Memory (10GB Swap)
+        run: |
+          sudo swapoff -a || true
+          sudo rm -f /mnt/swapfile /swapfile
+          sudo fallocate -l 10G /mnt/swapfile || sudo dd if=/dev/zero of=/mnt/swapfile bs=1M count=10240
+          sudo chmod 600 /mnt/swapfile
+          sudo mkswap /mnt/swapfile
+          sudo swapon /mnt/swapfile
+          free -h
+
+      - name: Checkout 9router-magisk
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Clone Upstream 9router Source
+        run: |
+          git clone --depth=1 https://github.com/decolua/9router.git 9router-src
+          echo "Upstream cloned successfully!"
+
+      - name: Build 9router Next.js Standalone
+        run: |
+          cd 9router-src
+          npm install --legacy-peer-deps --no-audit --no-fund
+          npm run build || npx next build
+          echo "Standalone build completed!"
+
+      - name: Assemble Magisk Module Package
+        run: |
+          mkdir -p dist/9router-module/9router
+          mkdir -p dist/9router-module/bin
+          mkdir -p dist/9router-module/lib
+
+          # Copy Magisk scripts
+          cp magisk-module/action.sh dist/9router-module/
+          cp magisk-module/service.sh dist/9router-module/
+          cp magisk-module/module.prop dist/9router-module/
+          cp magisk-module/update.json dist/9router-module/
+          cp magisk-module/control-center.cjs dist/9router-module/
+          chmod +x dist/9router-module/*.sh dist/9router-module/*.cjs
+
+          # Copy Standalone 9router Server files
+          if [ -d "9router-src/.next/standalone" ]; then
+            cp -rf 9router-src/.next/standalone/* dist/9router-module/9router/
+            cp -rf 9router-src/.next/static dist/9router-module/9router/.next/ 2>/dev/null || true
+            cp -rf 9router-src/public dist/9router-module/9router/ 2>/dev/null || true
+          else
+            cp -rf 9router-src/* dist/9router-module/9router/
+          fi
+
+          # Copy custom-server.js & open-sse
+          cp -rf 9router-src/custom-server.js dist/9router-module/9router/ 2>/dev/null || true
+          cp -rf 9router-src/open-sse dist/9router-module/9router/ 2>/dev/null || true
+
+          # Aggressive Cleanup: strip TS, tests, maps, dev dependencies to minimize ZIP size
+          cd dist/9router-module/9router
+          find . -name "*.ts" -not -name "*.d.ts" -delete 2>/dev/null || true
+          find . -name "*.map" -delete 2>/dev/null || true
+          find . -name "*.md" -delete 2>/dev/null || true
+          find . -type d -name "tests" -exec rm -rf {} + 2>/dev/null || true
+          find . -type d -name ".github" -exec rm -rf {} + 2>/dev/null || true
+          rm -rf .next/cache 2>/dev/null || true
+          cd ../../..
+
+      - name: Download & Bundle Node.js ARM64 Binary
+        run: |
+          cd dist/9router-module/bin
+          curl -sL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-arm64.tar.xz -o node-arm64.tar.xz
+          tar -xf node-arm64.tar.xz --strip-components=2 node-v22.14.0-linux-arm64/bin/node
+          rm -f node-arm64.tar.xz
+          chmod +x node
+          cd ../../..
+
+      - name: Compress & Create Ultra-Lite ZIP
+        run: |
+          cd dist/9router-module
+          zip -9 -r ../9router-magisk-module.zip .
+          cd ../..
+          ls -lh dist/9router-magisk-module.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v0.5.35
+          name: "9router Magisk Module v0.5.35 (Ultra-Lite)"
+          body: |
+            ## 9router Magisk Module (Ultra-Lite AI Gateway)
+            - **123+ AI Providers** (Antigravity, Codex, Claude Code, Windsurf, OpenRouter, Groq, etc.)
+            - **Zero-Playwright / Zero-Chromium** (Direct Protocol Emulation)
+            - **RTK Prompt Compression** (-40% token usage)
+            - **Standalone Control Center on Port 20129**:
+              - Toggle ON/OFF Dashboard SSR (~75MB RAM vs 250MB)
+              - Toggle ON/OFF Require Auth & API Key
+              - Toggle ON/OFF Admin Password Login
+              - Toggle Network Bind (Localhost 127.0.0.1 vs LAN 0.0.0.0)
+          files: dist/9router-magisk-module.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
