@@ -64,18 +64,29 @@ jobs:
 
           chmod +x dist/9router-module/*.sh dist/9router-module/*.cjs
 
-          # Copy Standalone 9router Server files to staging bundle
+          # Copy Standalone 9router Server files including dotfiles (use /. to capture hidden dirs)
           if [ -d "9router-src/.next/standalone" ]; then
-            cp -rf 9router-src/.next/standalone/* dist/app-bundle/9router/
-            cp -rf 9router-src/.next/static dist/app-bundle/9router/.next/ 2>/dev/null || true
-            cp -rf 9router-src/public dist/app-bundle/9router/ 2>/dev/null || true
+            cp -rf 9router-src/.next/standalone/. dist/app-bundle/9router/
           else
-            cp -rf 9router-src/* dist/app-bundle/9router/
+            cp -rf 9router-src/. dist/app-bundle/9router/
           fi
 
-          # Copy custom-server.js & open-sse
+          # Ensure complete production .next build (BUILD_ID, manifests, server, static)
+          mkdir -p dist/app-bundle/9router/.next
+          cp -rf 9router-src/.next/. dist/app-bundle/9router/.next/
+          rm -rf dist/app-bundle/9router/.next/cache
+
+          # Copy public, custom-server, open-sse, and missing dependencies as per 9router Dockerfile
+          cp -rf 9router-src/public dist/app-bundle/9router/ 2>/dev/null || true
           cp -rf 9router-src/custom-server.js dist/app-bundle/9router/ 2>/dev/null || true
           cp -rf 9router-src/open-sse dist/app-bundle/9router/ 2>/dev/null || true
+          mkdir -p dist/app-bundle/9router/src
+          cp -rf 9router-src/src/mitm dist/app-bundle/9router/src/ 2>/dev/null || true
+          mkdir -p dist/app-bundle/9router/node_modules
+          cp -rf 9router-src/node_modules/node-forge dist/app-bundle/9router/node_modules/ 2>/dev/null || true
+          cp -rf 9router-src/node_modules/next dist/app-bundle/9router/node_modules/ 2>/dev/null || true
+          cp -rf 9router-src/node_modules/sql.js dist/app-bundle/9router/node_modules/ 2>/dev/null || true
+          cp -rf 9router-src/node_modules/node-machine-id dist/app-bundle/9router/node_modules/ 2>/dev/null || true
 
           # Aggressive Cleanup: strip TS, tests, maps, dev dependencies
           cd dist/app-bundle/9router
@@ -122,13 +133,14 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.37
-          name: "9router Magisk Module v0.5.37 (Lightning Installer & RAM Stream)"
+          tag_name: v0.5.38
+          name: "9router Magisk Module v0.5.38 (Fix Production Build & BUILD_ID)"
           body: |
-            ## 9router Magisk Module v0.5.37 (Lightning Fast Installer)
-            - **⚡ Ultra-Fast RAM Streaming Extraction**: 9router core (3,500+ files) is packed into an optimized streamable tarball. Extraction is streamed directly in memory via RAM pipe (`unzip -p | tar -xz`), reducing installation time from 2+ minutes down to ~5 seconds!
-            - **📊 Live Interactive Progress**: Uses `SKIPUNZIP=1` with clear step-by-step console progress indicators (`[1/4]`, `[2/4]`, `[3/4]`, `[4/4]`). No more blank/frozen screen or feeling like it "hangs".
-            - **100% Standalone Android Bionic Node.js**: Built-in native ARM64 Node.js runtime with all required libraries (`libcrypto`, `libssl`, `libcares`, `libicu`, `libc++_shared`, CA root cert bundle).
+            ## 9router Magisk Module v0.5.38
+            - **🔧 Fix Next.js Production Build**: Fixed missing `.next` build files (`BUILD_ID`, manifests, `server/` routes) caused by bash glob omitting dotfolders during staging.
+            - **⚡ Ultra-Fast RAM Streaming Extraction**: 9router core is packed into a streamable tarball. Extraction is streamed directly in memory via RAM pipe (`unzip -p | tar -xz`), taking only ~5 seconds without freezing.
+            - **📊 Live Interactive Progress**: Uses `SKIPUNZIP=1` with clear console progress indicators (`[1/4]`, `[2/4]`, `[3/4]`, `[4/4]`).
+            - **100% Standalone Android Bionic Node.js**: Native ARM64 Node.js runtime with all required shared libraries (`libcrypto`, `libssl`, `libcares`, `libicu`, `libc++_shared`, CA root cert bundle).
             - **123+ AI Providers** (Antigravity, Codex, Claude Code, Windsurf, OpenRouter, Groq, etc.)
             - **Zero-Playwright / Zero-Chromium** (Direct Protocol Emulation)
             - **RTK Prompt Compression** (-40% token usage)
