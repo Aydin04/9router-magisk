@@ -60,24 +60,7 @@ jobs:
           cp magisk-module/module.prop dist/9router-module/
           cp magisk-module/update.json dist/9router-module/
           cp magisk-module/control-center.cjs dist/9router-module/
-          
-          # Create standard Magisk installer hooks
-          cat << EOF > dist/9router-module/customize.sh
-SKIPUNZIP=0
-ui_print "****************************************"
-ui_print "    ⚡ 9router AI Gateway Installer ⚡    "
-ui_print "****************************************"
-ui_print "[+] Extracting 9router module files..."
-set_perm_recursive $MODPATH 0 0 0755 0644
-set_perm_recursive $MODPATH/bin 0 0 0755 0755
-set_perm $MODPATH/service.sh 0 0 0755
-set_perm $MODPATH/action.sh 0 0 0755
-set_perm $MODPATH/control-center.cjs 0 0 0755
-mkdir -p /data/adb/9router-data
-set_perm_recursive /data/adb/9router-data 0 0 0777 0777
-ui_print "[+] Installation complete!"
-ui_print "[+] 9router will boot automatically on system restart."
-EOF
+          cp magisk-module/customize.sh dist/9router-module/
 
           chmod +x dist/9router-module/*.sh dist/9router-module/*.cjs
 
@@ -104,14 +87,26 @@ EOF
           rm -rf .next/cache 2>/dev/null || true
           cd ../../..
 
-      - name: Download & Bundle Node.js ARM64 Binary
+      - name: Download & Bundle Android ARM64 Node.js Runtime
         run: |
-          cd dist/9router-module/bin
-          curl -sL https://nodejs.org/dist/v22.14.0/node-v22.14.0-linux-arm64.tar.xz -o node-arm64.tar.xz
-          tar -xf node-arm64.tar.xz --strip-components=2 node-v22.14.0-linux-arm64/bin/node
-          rm -f node-arm64.tar.xz
-          chmod +x node
-          cd ../../..
+          mkdir -p /tmp/node-src
+          git clone --depth=1 https://github.com/FaaRamadhann/Magisk-Node.js.git /tmp/node-src
+
+          # Install native Android Bionic ARM64 node binary
+          cp -f /tmp/node-src/system/usr/lib/node/node dist/9router-module/bin/node.bin
+
+          # Install shared libraries & SSL certs
+          cp -rf /tmp/node-src/system/usr/lib/node/lib/* dist/9router-module/lib/
+          cp -f /tmp/node-src/system/usr/lib/node/cacert.pem dist/9router-module/lib/cacert.pem
+          cp -f /tmp/node-src/system/usr/lib/node/openssl.cnf dist/9router-module/lib/openssl.cnf
+
+          # Install node launcher wrapper
+          cp -f magisk-module/node-wrapper.sh dist/9router-module/bin/node
+
+          chmod 0755 dist/9router-module/bin/node
+          chmod 0755 dist/9router-module/bin/node.bin
+          chmod 0755 dist/9router-module/lib/*.so*
+          rm -rf /tmp/node-src
 
       - name: Compress & Create Ultra-Lite ZIP
         run: |
@@ -127,7 +122,8 @@ EOF
           name: "9router Magisk Module v0.5.36 (Ultra-Lite Standalone)"
           body: |
             ## 9router Magisk Module (Ultra-Lite AI Gateway)
-            - **100% Standalone**: Include native Node.js ARM64 binary (`bin/node`) & `customize.sh` Magisk installer.
+            - **100% Standalone Android Bionic Node.js**: Includes native ARM64 Node.js runtime + shared libraries (`libcrypto`, `libssl`, `libcares`, `libicu`, `libc++_shared`, CA bundle).
+            - **Magisk Installer (`customize.sh`)**: Sets proper executable permissions (0755) on binaries and libraries automatically.
             - **123+ AI Providers** (Antigravity, Codex, Claude Code, Windsurf, OpenRouter, Groq, etc.)
             - **Zero-Playwright / Zero-Chromium** (Direct Protocol Emulation)
             - **RTK Prompt Compression** (-40% token usage)

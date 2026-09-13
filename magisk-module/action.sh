@@ -6,14 +6,27 @@ mkdir -p "$DATA_DIR"
 echo "=================================================="
 echo "          ⚡ 9ROUTER CONTROL CENTER ⚡            "
 echo "=================================================="
+
+# Ensure execute permissions and libraries
+[ -f "$MODDIR/bin/node" ] && chmod 0755 "$MODDIR/bin/node" 2>/dev/null
+[ -f "$MODDIR/bin/node.bin" ] && chmod 0755 "$MODDIR/bin/node.bin" 2>/dev/null
+[ -d "$MODDIR/lib" ] && chmod 0755 "$MODDIR/lib"/* 2>/dev/null
+
+export PATH="$MODDIR/bin:/system/bin:/system/xbin:$PATH"
+export LD_LIBRARY_PATH="$MODDIR/lib:$LD_LIBRARY_PATH"
+[ -f "$MODDIR/lib/cacert.pem" ] && export SSL_CERT_FILE="$MODDIR/lib/cacert.pem"
+
 NODE_BIN=""
 if [ -x "$MODDIR/bin/node" ]; then
     NODE_BIN="$MODDIR/bin/node"
+elif [ -x "$MODDIR/bin/node.bin" ]; then
+    NODE_BIN="$MODDIR/bin/node.bin"
 elif [ -x "/data/data/com.termux/files/usr/bin/node" ]; then
     NODE_BIN="/data/data/com.termux/files/usr/bin/node"
 elif which node >/dev/null 2>&1; then
     NODE_BIN="$(which node)"
 fi
+
 if [ -z "$CTRL_PID" ] || ! kill -0 "$CTRL_PID" 2>/dev/null; then
     echo "[+] Launching Control Center Web UI on port 20129..."
     if [ -n "$NODE_BIN" ] && [ -f "$MODDIR/control-center.cjs" ]; then

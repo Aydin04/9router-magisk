@@ -15,9 +15,20 @@ mkdir -p "$DATA_DIR/tmp"
 exec >> "$LOG_FILE" 2>&1
 echo "=== Starting 9router Service at $(date) ==="
 
+# Ensure execute permissions on binary and libraries
+[ -f "$MODDIR/bin/node" ] && chmod 0755 "$MODDIR/bin/node" 2>/dev/null
+[ -f "$MODDIR/bin/node.bin" ] && chmod 0755 "$MODDIR/bin/node.bin" 2>/dev/null
+[ -d "$MODDIR/lib" ] && chmod 0755 "$MODDIR/lib"/* 2>/dev/null
+
+export PATH="$MODDIR/bin:/system/bin:/system/xbin:$PATH"
+export LD_LIBRARY_PATH="$MODDIR/lib:$LD_LIBRARY_PATH"
+[ -f "$MODDIR/lib/cacert.pem" ] && export SSL_CERT_FILE="$MODDIR/lib/cacert.pem"
+
 NODE_BIN=""
 if [ -x "$MODDIR/bin/node" ]; then
     NODE_BIN="$MODDIR/bin/node"
+elif [ -x "$MODDIR/bin/node.bin" ]; then
+    NODE_BIN="$MODDIR/bin/node.bin"
 elif [ -x "/data/data/com.termux/files/usr/bin/node" ]; then
     NODE_BIN="/data/data/com.termux/files/usr/bin/node"
 elif which node >/dev/null 2>&1; then
@@ -32,8 +43,6 @@ fi
 export PORT=20128
 export HOME="$DATA_DIR"
 export TMPDIR="$DATA_DIR/tmp"
-export PATH="$MODDIR/bin:/system/bin:/system/xbin:$PATH"
-export LD_LIBRARY_PATH="$MODDIR/lib:$LD_LIBRARY_PATH"
 
 if [ -f "$MODDIR/control-center.cjs" ]; then
     kill $(cat "$DATA_DIR/control_center.pid" 2>/dev/null) 2>/dev/null || true
