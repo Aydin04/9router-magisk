@@ -25,40 +25,31 @@ function patch(targetDir) {
     console.log(`[Patch] Copied ${copied} logo assets to public/providers/`);
   }
 
-  // 2. Patch ProviderIcon.js & providerIcon.js to support both .png and .svg
-  const providerIconHelperPath = path.join(targetDir, "src/shared/utils/providerIcon.js");
-  if (fs.existsSync(providerIconHelperPath)) {
-    let helperSrc = fs.readFileSync(providerIconHelperPath, "utf8");
-    if (!helperSrc.includes("resolveIconWithExt")) {
-      helperSrc = helperSrc.replace(
-        /export function getProviderIconSrc\(providerId\) \{[\s\S]*?\}/,
-        `export function getProviderIconSrc(providerId) {
-  const id = resolveProviderIconId(providerId);
-  return id ? \`/providers/\${id}.png\` : null;
-}`
-      );
-      fs.writeFileSync(providerIconHelperPath, helperSrc, "utf8");
-    }
-  }
-
+  // 2. Patch ProviderIcon.js with SVG fallback without syntax error
   const providerIconCompPath = path.join(targetDir, "src/shared/components/ProviderIcon.js");
   if (fs.existsSync(providerIconCompPath)) {
     let compSrc = fs.readFileSync(providerIconCompPath, "utf8");
-    if (!compSrc.includes("attemptSvgFallback")) {
-      compSrc = compSrc.replace(
-        /onError=\{\(\) => \{[\s\S]*?setErrored\(true\);[\s\S]*?\}\}/,
-        `onError={(e) => {
-        const currentSrc = e.currentTarget.src || "";
-        if (currentSrc.endsWith(".png")) {
-          e.currentTarget.src = currentSrc.replace(/\\.png$/, ".svg");
+    const oldOnError = `      onError={() => {
+        const m = effectiveSrc.match(/^\\/providers\\/([^/]+)\\.png$/i);
+        if (m) markProviderIconMissing(m[1]);
+        if (providerId) markProviderIconMissing(providerId);
+        setErrored(true);
+      }}`;
+
+    const newOnError = `      onError={(e) => {
+        const cur = e?.currentTarget?.src || "";
+        if (cur.endsWith(".png")) {
+          e.currentTarget.src = cur.slice(0, -4) + ".svg";
           return;
         }
         const m = effectiveSrc.match(/^\\/providers\\/([^/]+)\\.png$/i);
         if (m) markProviderIconMissing(m[1]);
         if (providerId) markProviderIconMissing(providerId);
         setErrored(true);
-      }}`
-      );
+      }}`;
+
+    if (compSrc.includes(oldOnError)) {
+      compSrc = compSrc.replace(oldOnError, newOnError);
       fs.writeFileSync(providerIconCompPath, compSrc, "utf8");
       console.log(`[Patch] Enhanced ProviderIcon.js with SVG fallback support`);
     }
@@ -200,7 +191,6 @@ function patch(targetDir) {
   if (fs.existsSync(providerDetailPath)) {
     let detailSrc = fs.readFileSync(providerDetailPath, "utf8");
 
-    // Add universal import button alongside Qoder/Cline buttons
     const qoderBtnAnchor = `{/* Import Qoder models button — only show for qoder provider */}`;
     const universalImportBtn = `{/* Universal Fetch Models from API button for any active connection */}
         {connections.some((conn) => conn.isActive !== false) && (
@@ -250,12 +240,11 @@ function patch(targetDir) {
     }
   }
 
-  // 7. Patch "Free Only" Filter on Providers Dashboard
+  // 7. Patch "Free Only" Filter on Providers Dashboard with 100% valid JSX
   const providersPagePath = path.join(targetDir, "src/app/(dashboard)/dashboard/providers/page.js");
   if (fs.existsSync(providersPagePath)) {
     let pageSrc = fs.readFileSync(providersPagePath, "utf8");
 
-    // Add showFreeOnly state
     if (!pageSrc.includes("showFreeOnly")) {
       pageSrc = pageSrc.replace(
         `const [statusFilter, setStatusFilter] = useState("all");`,
@@ -263,7 +252,6 @@ function patch(targetDir) {
   const [showFreeOnly, setShowFreeOnly] = useState(false);`
       );
 
-      // Filter entries by freeOnly
       pageSrc = pageSrc.replace(
         `  const oauthEntries = sortByPriority(
     Object.entries(OAUTH_PROVIDERS).filter(`,
@@ -279,11 +267,23 @@ function patch(targetDir) {
     .filter(`
       );
 
-      // Inject "Free Only" Toggle UI next to statusFilter dropdown
-      const targetDropdown = `<select
-          value={statusFilter}`;
+      // Clean, exact replace around <select ...> with balanced tags
+      const oldHeader = `      <div className="flex items-center justify-end">
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
+          aria-label="Filter providers by connection status"
+        >
+          {STATUS_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>`;
 
-      const toggleAndDropdown = `<div className="flex items-center gap-3">
+      const newHeader = `      <div className="flex items-center justify-end gap-3">
         <button
           type="button"
           onClick={() => setShowFreeOnly(!showFreeOnly)}
@@ -299,11 +299,24 @@ function patch(targetDir) {
           Free Only
         </button>
         <select
-          value={statusFilter}`;
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
+          aria-label="Filter providers by connection status"
+        >
+          {STATUS_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>`;
 
-      pageSrc = pageSrc.replace(targetDropdown, toggleAndDropdown);
-      fs.writeFileSync(providersPagePath, pageSrc, "utf8");
-      console.log(`[Patch] Injected 'Free Only' filter toggle into Providers Dashboard`);
+      if (pageSrc.includes(oldHeader)) {
+        pageSrc = pageSrc.replace(oldHeader, newHeader);
+        fs.writeFileSync(providersPagePath, pageSrc, "utf8");
+        console.log(`[Patch] Injected 'Free Only' filter toggle into Providers Dashboard`);
+      }
     }
   }
 }
