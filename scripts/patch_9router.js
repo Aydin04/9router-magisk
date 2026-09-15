@@ -741,8 +741,8 @@ export const DEFAULT_FREE_COMBOS = [
         `{/* Custom Providers (OpenAI/Anthropic Compatible) — dynamic */}\n      {(activeTabCategory === "all" || activeTabCategory === "custom") && (\n      <div className="flex flex-col gap-4">`
       );
       pSrc = pSrc.replace(
-        `        </div>\n      </div>\n\n      {/* OAuth Providers */}\n      {oauthEntries.length > 0 && (`,
-        `        </div>\n      </div>\n      )}\n\n      {/* OAuth Providers */}\n      {oauthEntries.length > 0 && (activeTabCategory === "all" || activeTabCategory === "oauth") && (`
+        `      </div>\n\n      {/* OAuth Providers */}\n      {oauthEntries.length > 0 && (`,
+        `      </div>\n      )}\n\n      {/* OAuth Providers */}\n      {oauthEntries.length > 0 && (activeTabCategory === "all" || activeTabCategory === "oauth") && (`
       );
 
       // Add Dedicated No-Auth Section before Free Tier
