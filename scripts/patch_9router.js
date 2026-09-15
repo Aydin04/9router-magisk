@@ -327,6 +327,215 @@ function checkIsModelFree(pId, mId, isFreeFlag) {
       console.log(`[Patch] Injected FREE badge display into ModelRow.js!`);
     }
   }
+
+  // 8. Built-in Free Combos (auto/best-free, best-free, auto/coding:free, coding-free, etc.)
+  const combosRepoPath = path.join(targetDir, "src/lib/db/repos/combosRepo.js");
+  if (fs.existsSync(combosRepoPath)) {
+    let cSrc = fs.readFileSync(combosRepoPath, "utf8");
+    if (!cSrc.includes("DEFAULT_FREE_COMBOS")) {
+      const defaultCombosCode = `
+export const DEFAULT_FREE_COMBOS = [
+  {
+    id: "builtin-auto-best-free",
+    name: "auto/best-free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/minimax-m2.5-free",
+      "opencode/nemotron-3-super-free",
+      "opencode/qwen3.6-plus-free",
+      "oc/deepseek-v4-flash-free",
+      "oc/minimax-m2.5-free",
+      "oc/nemotron-3-super-free",
+      "oc/qwen3.6-plus-free"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-best-free",
+    name: "best-free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/minimax-m2.5-free",
+      "opencode/nemotron-3-super-free",
+      "opencode/qwen3.6-plus-free",
+      "oc/deepseek-v4-flash-free",
+      "oc/minimax-m2.5-free",
+      "oc/nemotron-3-super-free",
+      "oc/qwen3.6-plus-free"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-auto-coding-free",
+    name: "auto/coding:free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/qwen3.6-plus-free",
+      "opencode/ling-2.6-1t-free",
+      "oc/deepseek-v4-flash-free",
+      "oc/qwen3.6-plus-free",
+      "oc/ling-2.6-1t-free"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-coding-free",
+    name: "coding-free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/qwen3.6-plus-free",
+      "opencode/ling-2.6-1t-free",
+      "oc/deepseek-v4-flash-free",
+      "oc/qwen3.6-plus-free",
+      "oc/ling-2.6-1t-free"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-auto-fast-free",
+    name: "auto/fast:free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/mimo-v2.5-free",
+      "opencode/big-pickle",
+      "oc/deepseek-v4-flash-free",
+      "oc/mimo-v2.5-free",
+      "oc/big-pickle"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-fast-free",
+    name: "fast-free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/mimo-v2.5-free",
+      "opencode/big-pickle",
+      "oc/deepseek-v4-flash-free",
+      "oc/mimo-v2.5-free",
+      "oc/big-pickle"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  }
+];
+`;
+      cSrc = defaultCombosCode + cSrc;
+
+      cSrc = cSrc.replace(
+        `export async function getCombos() {
+  const db = await getAdapter();
+  const rows = db.all(\`SELECT * FROM combos ORDER BY createdAt ASC\`);
+  return rows.map(rowToCombo);
+}`,
+        `export async function getCombos() {
+  const db = await getAdapter();
+  const rows = db.all(\`SELECT * FROM combos ORDER BY createdAt ASC\`);
+  const userCombos = rows.map(rowToCombo);
+  const userNames = new Set(userCombos.map(c => c.name));
+  const builtins = DEFAULT_FREE_COMBOS.filter(c => !userNames.has(c.name));
+  return [...builtins, ...userCombos];
+}`
+      );
+
+      cSrc = cSrc.replace(
+        `export async function getComboByName(name) {
+  const db = await getAdapter();
+  const row = db.get(\`SELECT * FROM combos WHERE name = ?\`, [name]);
+  return rowToCombo(row);
+}`,
+        `export async function getComboByName(name) {
+  const db = await getAdapter();
+  const row = db.get(\`SELECT * FROM combos WHERE name = ?\`, [name]);
+  if (row) return rowToCombo(row);
+  const builtin = DEFAULT_FREE_COMBOS.find(c => c.name === name);
+  return builtin || null;
+}`
+      );
+
+      fs.writeFileSync(combosRepoPath, cSrc, "utf8");
+      console.log(`[Patch] Injected DEFAULT_FREE_COMBOS into combosRepo.js!`);
+    }
+  }
+
+  // 9. Patch src/sse/services/model.js to allow combo names with slashes (auto/*)
+  const sseModelPath = path.join(targetDir, "src/sse/services/model.js");
+  if (fs.existsSync(sseModelPath)) {
+    let mSrc = fs.readFileSync(sseModelPath, "utf8");
+    const oldGetComboModels = `export async function getComboModels(modelStr) {
+  // Only check if it's not in provider/model format
+  if (modelStr.includes("/")) return null;
+
+  const combo = await getComboByName(modelStr);
+  if (combo && combo.models && combo.models.length > 0) {
+    return combo.models;
+  }
+  return null;
+}`;
+
+    const newGetComboModels = `export async function getComboModels(modelStr) {
+  // Check exact combo match first (allows auto/* and virtual free combos)
+  const directCombo = await getComboByName(modelStr);
+  if (directCombo && directCombo.models && directCombo.models.length > 0) {
+    return directCombo.models;
+  }
+
+  // If it is in standard provider/model format, it is not a plain combo name
+  if (modelStr.includes("/")) return null;
+
+  return null;
+}`;
+
+    if (mSrc.includes(oldGetComboModels)) {
+      mSrc = mSrc.replace(oldGetComboModels, newGetComboModels);
+      fs.writeFileSync(sseModelPath, mSrc, "utf8");
+      console.log(`[Patch] Updated getComboModels in src/sse/services/model.js to support slash combos!`);
+    }
+  }
+
+  // 10. Patch combos regex validation to allow slash (/) and colon (:) for auto/coding:free
+  const comboApiRoutePath = path.join(targetDir, "src/app/api/combos/route.js");
+  if (fs.existsSync(comboApiRoutePath)) {
+    let apiSrc = fs.readFileSync(comboApiRoutePath, "utf8");
+    if (apiSrc.includes("const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;")) {
+      apiSrc = apiSrc.replace(
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;",
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.:/\\-]+$/;"
+      );
+      fs.writeFileSync(comboApiRoutePath, apiSrc, "utf8");
+      console.log(`[Patch] Updated VALID_NAME_REGEX in api/combos/route.js`);
+    }
+  }
+
+  const comboPagePath = path.join(targetDir, "src/app/(dashboard)/dashboard/combos/page.js");
+  if (fs.existsSync(comboPagePath)) {
+    let pageSrc = fs.readFileSync(comboPagePath, "utf8");
+    if (pageSrc.includes("const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;")) {
+      pageSrc = pageSrc.replace(
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;",
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.:/\\-]+$/;"
+      );
+      fs.writeFileSync(comboPagePath, pageSrc, "utf8");
+      console.log(`[Patch] Updated VALID_NAME_REGEX in dashboard/combos/page.js`);
+    }
+  }
 }
 
 // Support CLI call
