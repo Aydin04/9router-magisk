@@ -41,6 +41,11 @@ jobs:
           git clone --depth=1 https://github.com/decolua/9router.git 9router-src
           echo "Upstream cloned successfully!"
 
+      - name: Apply Extra Providers & Logos Patch
+        run: |
+          node scripts/patch_9router.js 9router-src
+          echo "380+ providers and logos applied successfully!"
+
       - name: Build 9router Next.js Standalone
         run: |
           cd 9router-src
