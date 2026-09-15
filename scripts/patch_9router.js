@@ -8,6 +8,7 @@ function patch(targetDir) {
   const publicProvidersDir = path.join(targetDir, "public/providers");
   const assetsDir = path.join(__dirname, "../extra-assets/providers");
   const extractedFile = path.join(__dirname, "extracted_providers.json");
+  const freeCatalogFile = path.join(__dirname, "free_models_catalog.json");
 
   if (!fs.existsSync(registryDir)) {
     console.error(`[Error] Registry dir not found: ${registryDir}`);
@@ -68,50 +69,27 @@ function patch(targetDir) {
     for (const [id, prov] of Object.entries(extracted)) {
       if (existing.has(id)) continue;
 
-      const isWeb = prov.category === "webCookie";
-      const cleanName = (prov.name || id).replace(/"/g, '\\"');
-      const cleanWebsite = prov.website || "";
-      const cleanColor = prov.color || "#4F46E5";
-      const cleanTextIcon = prov.textIcon || id.slice(0, 2).toUpperCase();
-      const cleanHint = (prov.authHint || `API key for ${prov.name}`).replace(/"/g, '\\"');
-
-      const trimmedWebsite = cleanWebsite ? cleanWebsite.replace(/\/+$/, "") : "";
-      let baseUrl = "";
-      if (isWeb) {
-        baseUrl = trimmedWebsite ? `${trimmedWebsite}/chat` : `https://${id}.com`;
-      } else {
-        baseUrl = trimmedWebsite ? `${trimmedWebsite}/v1/chat/completions` : `https://api.${id}.com/v1/chat/completions`;
-      }
-
+      const filePath = path.join(registryDir, `${id}.js`);
       const fileContent = `export default {
-  id: "${id}",
-  alias: "${id}",
-  display: {
-    name: "${cleanName}",
-    icon: "${prov.icon || 'auto_awesome'}",
-    color: "${cleanColor}",
-    textIcon: "${cleanTextIcon}",
-    website: "${cleanWebsite}",
-  },
-  category: "${isWeb ? 'webCookie' : 'apikey'}",
-  authType: "${isWeb ? 'cookie' : 'apikey'}",
-  authHint: "${cleanHint}",
-  ${prov.hasFree ? "hasFree: true," : ""}
-  transport: {
-    baseUrl: "${baseUrl}",
-    format: "openai",
-    authType: "${isWeb ? 'cookie' : 'apikey'}",
-  },
-  models: [
-    { id: "default", name: "${cleanName} Default" },
-  ],
-  passthroughModels: true,
+  id: ${JSON.stringify(prov.id)},
+  name: ${JSON.stringify(prov.name || id)},
+  baseUrl: ${JSON.stringify(prov.baseUrl || "")},
+  apiType: ${JSON.stringify(prov.apiType || "openai")},
+  category: ${JSON.stringify(prov.category || "llm")},
+  icon: ${JSON.stringify(prov.icon || "")},
+  color: ${JSON.stringify(prov.color || "#4F46E5")},
+  authModes: ${JSON.stringify(prov.authModes || ["apikey"])},
+  hasFree: ${JSON.stringify(prov.hasFree || false)},
+  freeTier: ${JSON.stringify(prov.freeTier || false)},
+  pricing: ${JSON.stringify(prov.pricing || null)},
+  disabled: false,
+  description: ${JSON.stringify(prov.description || "")}
 };
 `;
-      fs.writeFileSync(path.join(registryDir, `${id}.js`), fileContent, "utf8");
+      fs.writeFileSync(filePath, fileContent, "utf8");
       addedCount++;
     }
-    console.log(`[Patch] Successfully generated ${addedCount} new provider modules!`);
+    console.log(`[Patch] Injected ${addedCount} new provider registries!`);
 
     // 4. Regenerate registry/index.js
     const allFiles = fs.readdirSync(registryDir)
@@ -186,11 +164,12 @@ function patch(targetDir) {
     }
   }
 
-  // 6. Patch "Fetch Models from API" Button on Provider Detail Page
+  // 6. Patch Provider Detail Page: "Fetch Models from API" & "Free Only" Models Filter
   const providerDetailPath = path.join(targetDir, "src/app/(dashboard)/dashboard/providers/[id]/page.js");
   if (fs.existsSync(providerDetailPath)) {
     let detailSrc = fs.readFileSync(providerDetailPath, "utf8");
 
+    // 6a. Inject Universal Fetch Models button
     const qoderBtnAnchor = `{/* Import Qoder models button — only show for qoder provider */}`;
     const universalImportBtn = `{/* Universal Fetch Models from API button for any active connection */}
         {connections.some((conn) => conn.isActive !== false) && (
@@ -235,88 +214,117 @@ function patch(targetDir) {
 
     if (!detailSrc.includes("Fetch Models from API") && detailSrc.includes(qoderBtnAnchor)) {
       detailSrc = detailSrc.replace(qoderBtnAnchor, universalImportBtn);
+    }
+
+    // 6b. Inject Free Catalog & checkIsModelFree Helper
+    if (!detailSrc.includes("checkIsModelFree")) {
+      const freeCatalogRaw = fs.existsSync(freeCatalogFile)
+        ? fs.readFileSync(freeCatalogFile, "utf8").trim()
+        : "{}";
+      const catalogHelper = `
+const FREE_MODELS_CATALOG = ${freeCatalogRaw};
+function checkIsModelFree(pId, mId, isFreeFlag) {
+  if (isFreeFlag === true) return true;
+  if (!mId) return false;
+  const lower = String(mId).toLowerCase();
+  if (lower.includes("free") || lower.endsWith(":free")) return true;
+  const list = FREE_MODELS_CATALOG[pId];
+  if (Array.isArray(list) && list.includes(mId)) return true;
+  return false;
+}
+`;
+      // Insert after "use client";
+      detailSrc = detailSrc.replace('"use client";', '"use client";\n' + catalogHelper);
+
+      // Add showFreeModelsOnly state
+      detailSrc = detailSrc.replace(
+        `const [customModels, setCustomModels] = useState([]);`,
+        `const [customModels, setCustomModels] = useState([]);
+  const [showFreeModelsOnly, setShowFreeModelsOnly] = useState(false);`
+      );
+
+      // Filter displayModels in renderModelsSection
+      detailSrc = detailSrc.replace(
+        `const displayModels = allModels.filter((m) => !disabledSet.has(m.id));`,
+        `const filteredByFree = showFreeModelsOnly
+      ? allModels.filter((m) => checkIsModelFree(providerId, m.id, m.isFree))
+      : allModels;
+    const displayModels = filteredByFree.filter((m) => !disabledSet.has(m.id));`
+      );
+
+      // Pass accurate isFree prop to ModelRow for both custom and built-in models
+      detailSrc = detailSrc.replace(
+        `isFree={false}`,
+        `isFree={checkIsModelFree(providerId, model.id, false)}`
+      );
+      detailSrc = detailSrc.replace(
+        `isFree={model.isFree}`,
+        `isFree={checkIsModelFree(providerId, model.id, model.isFree)}`
+      );
+
+      // Add "Free Only" Toggle Button in Available Models Card header
+      const oldModelsHeading = `<h2 className="text-lg font-semibold">
+              {"Available Models"}
+            </h2>`;
+      const newModelsHeading = `<div className="flex items-center gap-2.5">
+              <h2 className="text-lg font-semibold">
+                {"Available Models"}
+              </h2>
+              <button
+                type="button"
+                onClick={() => setShowFreeModelsOnly(!showFreeModelsOnly)}
+                className={\`flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium border transition-all \${
+                  showFreeModelsOnly
+                    ? "bg-emerald-500/10 border-emerald-500/40 text-emerald-600 dark:text-emerald-400 font-semibold"
+                    : "border-border text-text-muted hover:bg-sidebar hover:text-text-primary"
+                }\`}
+                title="Show only free models"
+              >
+                <span className="material-symbols-outlined text-[14px]">
+                  {showFreeModelsOnly ? "check_circle" : "paid"}
+                </span>
+                Free Only
+              </button>
+            </div>`;
+
+      if (detailSrc.includes(oldModelsHeading)) {
+        detailSrc = detailSrc.replace(oldModelsHeading, newModelsHeading);
+      }
+
       fs.writeFileSync(providerDetailPath, detailSrc, "utf8");
-      console.log(`[Patch] Injected 'Fetch Models from API' button into Provider detail page`);
+      console.log(`[Patch] Injected 'Free Only' model filter into Provider Detail Page!`);
     }
   }
 
-  // 7. Patch "Free Only" Filter on Providers Dashboard with 100% valid JSX
-  const providersPagePath = path.join(targetDir, "src/app/(dashboard)/dashboard/providers/page.js");
-  if (fs.existsSync(providersPagePath)) {
-    let pageSrc = fs.readFileSync(providersPagePath, "utf8");
-
-    if (!pageSrc.includes("showFreeOnly")) {
-      pageSrc = pageSrc.replace(
-        `const [statusFilter, setStatusFilter] = useState("all");`,
-        `const [statusFilter, setStatusFilter] = useState("all");
-  const [showFreeOnly, setShowFreeOnly] = useState(false);`
-      );
-
-      pageSrc = pageSrc.replace(
-        `  const oauthEntries = sortByPriority(
-    Object.entries(OAUTH_PROVIDERS).filter(`,
-        `  const oauthEntries = sortByPriority(
-    Object.entries(OAUTH_PROVIDERS).filter(([k, info]) => (!showFreeOnly || info.hasFree || info.category === "free" || info.category === "freeTier")).filter(`
-      );
-
-      pageSrc = pageSrc.replace(
-        `  const apikeyEntries = Object.entries(APIKEY_PROVIDERS)
-    .filter(`,
-        `  const apikeyEntries = Object.entries(APIKEY_PROVIDERS)
-    .filter(([k, info]) => (!showFreeOnly || info.hasFree || info.category === "free" || info.category === "freeTier"))
-    .filter(`
-      );
-
-      // Clean, exact replace around <select ...> with balanced tags
-      const oldHeader = `      <div className="flex items-center justify-end">
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
-          aria-label="Filter providers by connection status"
-        >
-          {STATUS_FILTER_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>`;
-
-      const newHeader = `      <div className="flex items-center justify-end gap-3">
-        <button
-          type="button"
-          onClick={() => setShowFreeOnly(!showFreeOnly)}
-          className={\`flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs font-medium transition-all \${
-            showFreeOnly
-              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-semibold"
-              : "border-black/10 bg-black/[0.02] text-text-muted hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03]"
-          }\`}
-        >
-          <span className="material-symbols-outlined text-[15px]">
-            {showFreeOnly ? "check_circle" : "paid"}
+  // 7. Patch ModelRow.js to show green FREE badge when isFree is true
+  const modelRowPath = path.join(targetDir, "src/app/(dashboard)/dashboard/providers/[id]/ModelRow.js");
+  if (fs.existsSync(modelRowPath)) {
+    let rowSrc = fs.readFileSync(modelRowPath, "utf8");
+    const oldCopyBtnGroup = `        <div className="relative shrink-0 group/btn">
+          <button
+            onClick={() => onCopy(displayModel, \`model-\${model.id}\`)}
+            className="rounded p-0.5 text-text-muted hover:bg-sidebar hover:text-primary"
+          >
+            <span className="material-symbols-outlined text-sm">
+              {copied === \`model-\${model.id}\` ? "check" : "content_copy"}
+            </span>
+          </button>
+          <span className="pointer-events-none absolute mt-1 top-5 left-1/2 -translate-x-1/2 text-[10px] text-text-muted whitespace-nowrap opacity-0 group-hover/btn:opacity-100 transition-opacity">
+            {copied === \`model-\${model.id}\` ? "Copied!" : "Copy"}
           </span>
-          Free Only
-        </button>
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
-          aria-label="Filter providers by connection status"
-        >
-          {STATUS_FILTER_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-      </div>`;
+        </div>`;
 
-      if (pageSrc.includes(oldHeader)) {
-        pageSrc = pageSrc.replace(oldHeader, newHeader);
-        fs.writeFileSync(providersPagePath, pageSrc, "utf8");
-        console.log(`[Patch] Injected 'Free Only' filter toggle into Providers Dashboard`);
-      }
+    const newCopyBtnGroupWithBadge = oldCopyBtnGroup + `
+        {isFree && (
+          <span className="shrink-0 text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 border border-emerald-500/30 px-1.5 py-0.5 rounded">
+            FREE
+          </span>
+        )}`;
+
+    if (!rowSrc.includes("isFree &&") && rowSrc.includes(oldCopyBtnGroup)) {
+      rowSrc = rowSrc.replace(oldCopyBtnGroup, newCopyBtnGroupWithBadge);
+      fs.writeFileSync(modelRowPath, rowSrc, "utf8");
+      console.log(`[Patch] Injected FREE badge display into ModelRow.js!`);
     }
   }
 }
