@@ -536,6 +536,370 @@ export const DEFAULT_FREE_COMBOS = [
       console.log(`[Patch] Updated VALID_NAME_REGEX in dashboard/combos/page.js`);
     }
   }
+
+  // 11. Configure No-Auth Providers in Registry (opencode, theoldllm, uncloseai, duckduckgo-web, felo-web, mimo-free)
+  const noAuthUpdates = {
+    "theoldllm.js": {
+      category: "free",
+      alias: "tllm",
+      noAuth: true,
+      authType: "none",
+      authHint: "No credentials required — uses pure HTTP token generation (no browser needed).",
+      models: [
+        { id: "GPT_5_4", name: "GPT-5.4 (The Old LLM 🆓)", contextLength: 400000 },
+        { id: "GPT_5_3", name: "GPT-5.3 (The Old LLM 🆓)", contextLength: 400000 },
+        { id: "CLAUDE_4_6_OPUS", name: "Claude 4.6 Opus (The Old LLM 🆓)", contextLength: 200000 },
+        { id: "CLAUDE_4_6_SONNET", name: "Claude 4.6 Sonnet (The Old LLM 🆓)", contextLength: 200000 },
+        { id: "together_deepseek_v3", name: "DeepSeek V3 (The Old LLM 🆓)" },
+        { id: "openrouter_deepseek_r1", name: "DeepSeek R1 (The Old LLM 🆓)" },
+        { id: "gemini_3_pro", name: "Gemini 3 Pro (The Old LLM 🆓)" }
+      ]
+    },
+    "uncloseai.js": {
+      category: "free",
+      alias: "unc",
+      noAuth: true,
+      authType: "none",
+      authHint: "No auth required — public OpenAI-compatible endpoint.",
+      models: [
+        { id: "adamo1139/Hermes-3-Llama-3.1-8B-FP8-Dynamic", name: "Hermes 3 Llama 3.1 8B (🆓 Free)" },
+        { id: "qwen3.6:27b", name: "Qwen3 Coder 27B (🆓 Free)" },
+        { id: "gemma4:31b", name: "Gemma 4 31B (🆓 Free)" }
+      ]
+    },
+    "duckduckgo-web.js": {
+      category: "free",
+      alias: "ddgw",
+      noAuth: true,
+      authType: "none",
+      authHint: "No credentials required — DuckDuckGo AI Chat is anonymous and free.",
+      models: [
+        { id: "gpt-5.4-mini", name: "GPT-5.4 Mini", toolCalling: false },
+        { id: "claude-haiku-4-5", name: "Claude Haiku 4.5", toolCalling: false },
+        { id: "tinfoil/gpt-oss-120b", name: "gpt-oss 120B", toolCalling: false }
+      ]
+    },
+    "felo-web.js": {
+      category: "free",
+      alias: "felo",
+      noAuth: true,
+      authType: "none",
+      authHint: "No credentials required — Felo is a free search/chat aggregator.",
+      models: [
+        { id: "felo-chat", name: "Felo Chat", toolCalling: false },
+        { id: "felo-search", name: "Felo Search", toolCalling: false }
+      ]
+    }
+  };
+
+  for (const [filename, info] of Object.entries(noAuthUpdates)) {
+    const rFile = path.join(registryDir, filename);
+    if (fs.existsSync(rFile)) {
+      let rSrc = fs.readFileSync(rFile, "utf8");
+      if (!rSrc.includes("noAuth: true")) {
+        rSrc = rSrc.replace(/category:\s*["\x27][^"\x27]+["\x27],?/, `category: "${info.category}",\n  noAuth: true,`);
+        if (info.alias) {
+          rSrc = rSrc.replace(/alias:\s*["\x27][^"\x27]+["\x27],?/, `alias: "${info.alias}",\n  uiAlias: "${info.alias}",`);
+        }
+        if (info.models && info.models.length > 0) {
+          rSrc = rSrc.replace(/models:\s*\[[\s\S]*?\],/, `models: ${JSON.stringify(info.models, null, 2)},`);
+        }
+        fs.writeFileSync(rFile, rSrc, "utf8");
+        console.log(`[Patch] Updated ${filename} to noAuth: true`);
+      }
+    }
+  }
+
+  // 12. Patch Providers Page (/dashboard/providers) with Category Tabs (All, No-Auth, Free Tier, OAuth, API Key, Web Cookie, Custom)
+  const providersPagePath = path.join(targetDir, "src/app/(dashboard)/dashboard/providers/page.js");
+  if (fs.existsSync(providersPagePath)) {
+    let pSrc = fs.readFileSync(providersPagePath, "utf8");
+    if (!pSrc.includes("activeTabCategory")) {
+      // Add activeTabCategory state
+      pSrc = pSrc.replace(
+        `const [statusFilter, setStatusFilter] = useState("all");`,
+        `const [statusFilter, setStatusFilter] = useState("all");
+  const [activeTabCategory, setActiveTabCategory] = useState("all");`
+      );
+
+      // Separate No-Auth entries from Free Tier
+      const oldFreeEntries = `  const freeEntries = Object.entries(FREE_PROVIDERS)
+    .filter(
+      ([key, info]) =>
+        !info.hidden &&
+        matchSearch(info.name) &&
+        matchStatus(getProviderStats(key, dualAuthTypes(info, key)), info.noAuth),
+    )
+    .sort(([, a], [, b]) => (b.noAuth ? 1 : 0) - (a.noAuth ? 1 : 0));`;
+
+      const newNoAuthAndFreeEntries = `  const allFreeEntries = Object.entries(FREE_PROVIDERS)
+    .filter(
+      ([key, info]) =>
+        !info.hidden &&
+        matchSearch(info.name) &&
+        matchStatus(getProviderStats(key, dualAuthTypes(info, key)), info.noAuth),
+    )
+    .sort(([, a], [, b]) => (b.noAuth ? 1 : 0) - (a.noAuth ? 1 : 0));
+
+  const noAuthEntries = allFreeEntries.filter(([, info]) => info.noAuth === true);
+  const freeEntries = allFreeEntries.filter(([, info]) => !info.noAuth);
+  const webCookieEntries = Object.entries(WEB_COOKIE_PROVIDERS)
+    .filter(
+      ([key, info]) =>
+        !info.hidden &&
+        matchSearch(info.name) &&
+        matchStatus(getProviderStats(key, "apikey"), info.noAuth),
+    )
+    .sort(([ka, a], [kb, b]) => (a.name || "").localeCompare(b.name || ""));`;
+
+      if (pSrc.includes(oldFreeEntries)) {
+        pSrc = pSrc.replace(oldFreeEntries, newNoAuthAndFreeEntries);
+      }
+
+      // Inject category tabs UI above the grid
+      const oldHeaderFilter = `      <div className="flex items-center justify-end">
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value)}
+          className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
+          aria-label="Filter providers by connection status"
+        >
+          {STATUS_FILTER_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </div>`;
+
+      const newHeaderTabsAndFilter = `      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 border-b border-border/60 pb-3">
+        {/* Category Tabs */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {[
+            { id: "all", label: "All", count: null },
+            { id: "noauth", label: "No-Auth (Keyless)", count: noAuthEntries.length, badge: "FREE" },
+            { id: "freeTier", label: "Free Tier", count: freeEntries.length + freeTierEntries.length },
+            { id: "oauth", label: "OAuth", count: oauthEntries.length },
+            { id: "apikey", label: "API Key", count: apikeyEntries.length },
+            { id: "webCookie", label: "Web Cookie", count: webCookieEntries.length },
+            { id: "custom", label: "Custom", count: compatibleProviders.length + anthropicCompatibleProviders.length }
+          ].map((tab) => {
+            const active = activeTabCategory === tab.id;
+            return (
+              <button
+                key={tab.id}
+                type="button"
+                onClick={() => setActiveTabCategory(tab.id)}
+                className={\`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all \${
+                  active
+                    ? "bg-primary text-white shadow-sm"
+                    : "bg-surface border border-border text-text-muted hover:bg-sidebar hover:text-text-primary"
+                }\`}
+              >
+                <span>{tab.label}</span>
+                {tab.count !== null && (
+                  <span className={\`text-[10px] px-1.5 py-0.2 rounded-full font-bold \${
+                    active ? "bg-white/20 text-white" : "bg-black/5 dark:bg-white/10 text-text-muted"
+                  }\`}>
+                    {tab.count}
+                  </span>
+                )}
+                {tab.badge && (
+                  <span className="text-[9px] bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 font-bold px-1 rounded">
+                    {tab.badge}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Status Filter */}
+        <div className="flex items-center self-end sm:self-auto">
+          <select
+            value={statusFilter}
+            onChange={(e) => setStatusFilter(e.target.value)}
+            className="h-8 rounded-lg border border-black/10 bg-black/[0.02] px-2 text-xs text-text-primary outline-none transition-colors hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03] dark:hover:bg-white/10"
+            aria-label="Filter providers by connection status"
+          >
+            {STATUS_FILTER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>`;
+
+      if (pSrc.includes(oldHeaderFilter)) {
+        pSrc = pSrc.replace(oldHeaderFilter, newHeaderTabsAndFilter);
+      }
+
+      // Add conditional rendering for Custom Providers section
+      pSrc = pSrc.replace(
+        `{/* Custom Providers (OpenAI/Anthropic Compatible) — dynamic */}\n      <div className="flex flex-col gap-4">`,
+        `{/* Custom Providers (OpenAI/Anthropic Compatible) — dynamic */}\n      {(activeTabCategory === "all" || activeTabCategory === "custom") && (\n      <div className="flex flex-col gap-4">`
+      );
+      pSrc = pSrc.replace(
+        `        </div>\n      </div>\n\n      {/* OAuth Providers */}\n      {oauthEntries.length > 0 && (`,
+        `        </div>\n      </div>\n      )}\n\n      {/* OAuth Providers */}\n      {oauthEntries.length > 0 && (activeTabCategory === "all" || activeTabCategory === "oauth") && (`
+      );
+
+      // Add Dedicated No-Auth Section before Free Tier
+      const noAuthSectionCode = `
+      {/* No-Auth Providers (Keyless / Public Endpoint) */}
+      {noAuthEntries.length > 0 && (activeTabCategory === "all" || activeTabCategory === "noauth") && (
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg sm:text-xl font-semibold leading-tight">
+              No-Auth Providers (Keyless)
+            </h2>
+            <span className="text-[10px] font-bold bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full">
+              NO API KEY NEEDED
+            </span>
+          </div>
+          <button
+            onClick={() => handleBatchTest("free")}
+            disabled={!!testingMode}
+            className={\`flex w-full items-center justify-center gap-1.5 rounded-lg border px-3 py-2 text-xs font-medium transition-colors sm:w-auto sm:py-1.5 \${
+              testingMode === "free"
+                ? "bg-primary/20 border-primary/40 text-primary animate-pulse"
+                : "bg-bg border-border text-text-muted hover:text-text-main hover:border-primary/40"
+            }\`}
+            title="Test all No-Auth connections"
+          >
+            <span className={\`material-symbols-outlined text-[14px]\${testingMode === "free" ? " animate-spin" : ""}\`}>
+              play_arrow
+            </span>
+            {testingMode === "free" ? "Testing..." : "Test All"}
+          </button>
+        </div>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-3 xl:grid-cols-4">
+          {noAuthEntries.map(([key, info]) => {
+            const freeAuthTypes = dualAuthTypes(info, key);
+            return (
+              <ProviderCard
+                key={key}
+                providerId={key}
+                provider={info}
+                stats={getProviderStats(key, freeAuthTypes)}
+                authType="free"
+                onToggle={(active) =>
+                  handleToggleProvider(key, freeAuthTypes, active)
+                }
+              />
+            );
+          })}
+        </div>
+      </div>
+      )}
+`;
+
+      pSrc = pSrc.replace(
+        `{/* Free Tier Providers */}\n      {(freeEntries.length > 0 || freeTierEntries.length > 0) && (`,
+        noAuthSectionCode + `\n      {/* Free Tier Providers */}\n      {(freeEntries.length > 0 || freeTierEntries.length > 0) && (activeTabCategory === "all" || activeTabCategory === "freeTier") && (`
+      );
+
+      // Wrap API Key Providers section with activeTabCategory
+      pSrc = pSrc.replace(
+        `{/* API Key Providers — fixed list */}\n      {apikeyEntries.length > 0 && (`,
+        `{/* API Key Providers — fixed list */}\n      {apikeyEntries.length > 0 && (activeTabCategory === "all" || activeTabCategory === "apikey") && (`
+      );
+
+      // Un-comment & wrap Web Cookie Providers section
+      const webCookieSectionUncommented = `
+      {/* Web Cookie Providers */}
+      {webCookieEntries.length > 0 && (activeTabCategory === "all" || activeTabCategory === "webCookie") && (
+      <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-lg sm:text-xl font-semibold flex items-center gap-2">
+            Web Cookie Providers
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {webCookieEntries.map(([key, info]) => (
+            <ApiKeyProviderCard
+              key={key}
+              providerId={key}
+              provider={info}
+              stats={getProviderStats(key, "apikey")}
+              authType="apikey"
+              onToggle={(active) => handleToggleProvider(key, "apikey", active)}
+            />
+          ))}
+        </div>
+      </div>
+      )}
+`;
+
+      const oldWebCookieComment = `      {/* Web Cookie Providers — use browser subscription cookie instead of API key */}
+      {/* <div className="flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold flex items-center gap-2">
+            Web Cookie Providers{" "}
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
+          {Object.entries(WEB_COOKIE_PROVIDERS).map(([key, info]) => (
+            <ApiKeyProviderCard
+              key={key}
+              providerId={key}
+              provider={info}
+              stats={getProviderStats(key, "apikey")}
+              authType="apikey"
+              onToggle={(active) => handleToggleProvider(key, "apikey", active)}
+            />
+          ))}
+        </div>
+      </div> */}`;
+
+      if (pSrc.includes(oldWebCookieComment)) {
+        pSrc = pSrc.replace(oldWebCookieComment, webCookieSectionUncommented);
+      }
+
+      fs.writeFileSync(providersPagePath, pSrc, "utf8");
+      console.log(`[Patch] Injected Category Tabs and No-Auth section into Providers Page!`);
+    }
+  }
+
+  // 13. Auto-include No-Auth provider models in /v1/models route
+  const v1ModelsRoutePath = path.join(targetDir, "src/app/api/v1/models/route.js");
+  if (fs.existsSync(v1ModelsRoutePath)) {
+    let rSrc = fs.readFileSync(v1ModelsRoutePath, "utf8");
+    if (!rSrc.includes("const noAuthProviders = Object.values(AI_PROVIDERS).filter(p => p.noAuth);")) {
+      const oldDedupAnchor = `  const dedupedModels = [];
+  const seenModelIds = new Set();
+  for (const model of models) {`;
+
+      const newDedupWithNoAuth = `  // Ensure No-Auth free models (opencode, theoldllm, uncloseai, etc.) are always discoverable in /v1/models
+  const noAuthProviders = Object.values(AI_PROVIDERS).filter(p => p.noAuth && !activeConnectionByProvider.has(p.id));
+  for (const p of noAuthProviders) {
+    const pAlias = p.alias || p.id;
+    const staticAlias = PROVIDER_ID_TO_ALIAS[p.id] || pAlias;
+    const pModels = PROVIDER_MODELS[staticAlias] || p.models || [];
+    for (const m of pModels) {
+      const mId = m.id || m.name || m;
+      if (!mId) continue;
+      models.push({
+        id: \`\${pAlias}/\${mId}\`,
+        object: "model",
+        owned_by: pAlias,
+      });
+    }
+  }
+
+  const dedupedModels = [];
+  const seenModelIds = new Set();
+  for (const model of models) {`;
+
+      if (rSrc.includes(oldDedupAnchor)) {
+        rSrc = rSrc.replace(oldDedupAnchor, newDedupWithNoAuth);
+        fs.writeFileSync(v1ModelsRoutePath, rSrc, "utf8");
+        console.log(`[Patch] Injected auto-discovery for No-Auth models into /v1/models route!`);
+      }
+    }
+  }
 }
 
 // Support CLI call
