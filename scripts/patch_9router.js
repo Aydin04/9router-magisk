@@ -144,6 +144,168 @@ function patch(targetDir) {
     fs.writeFileSync(path.join(registryDir, "index.js"), indexContent, "utf8");
     console.log(`[Patch] Regenerated open-sse/providers/registry/index.js with ${allFiles.length} providers!`);
   }
+
+  // 5. Patch Universal Auto Fetch Models API
+  const modelsRoutePath = path.join(targetDir, "src/app/api/providers/[id]/models/route.js");
+  if (fs.existsSync(modelsRoutePath)) {
+    let routeSrc = fs.readFileSync(modelsRoutePath, "utf8");
+    const oldConfigCheck = `    const config = PROVIDER_MODELS_CONFIG[connection.provider];
+    if (!config) {
+      return NextResponse.json(
+        { error: \`Provider \${connection.provider} does not support models listing\` },
+        { status: 400 }
+      );
+    }`;
+
+    const newUniversalFallback = `    let config = PROVIDER_MODELS_CONFIG[connection.provider];
+    if (!config) {
+      // Universal OpenAI-compatible auto-discovery for any provider
+      const token = connection.providerSpecificData?.copilotToken || connection.accessToken || connection.apiKey;
+      let targetBase = connection.providerSpecificData?.baseUrl || "";
+      if (!targetBase) {
+        try {
+          const { PROVIDERS } = require("open-sse/config/providers.js");
+          targetBase = PROVIDERS[connection.provider]?.baseUrl || "";
+        } catch (_) {}
+      }
+      
+      if (token && targetBase && /^https?:\\/\\//i.test(targetBase)) {
+        let modelsUrl = targetBase.replace(/\\/+$/, "");
+        modelsUrl = modelsUrl.replace(/\\/(chat\\/completions|responses|chat|messages)$/i, "");
+        if (!modelsUrl.endsWith("/models")) {
+          modelsUrl = \`\${modelsUrl}/models\`;
+        }
+        config = createOpenAIModelsConfig(modelsUrl);
+      } else {
+        // Fallback to static catalog if no URL can be probed
+        const staticList = getStaticProviderModels(connection.provider);
+        return NextResponse.json({
+          provider: connection.provider,
+          connectionId: connection.id,
+          models: staticList,
+          warning: "Provider does not expose dynamic endpoint; loaded static catalog."
+        });
+      }
+    }`;
+
+    if (routeSrc.includes(oldConfigCheck)) {
+      routeSrc = routeSrc.replace(oldConfigCheck, newUniversalFallback);
+      fs.writeFileSync(modelsRoutePath, routeSrc, "utf8");
+      console.log(`[Patch] Injected Universal Models Auto-Discovery into /api/providers/[id]/models/route.js`);
+    }
+  }
+
+  // 6. Patch "Fetch Models from API" Button on Provider Detail Page
+  const providerDetailPath = path.join(targetDir, "src/app/(dashboard)/dashboard/providers/[id]/page.js");
+  if (fs.existsSync(providerDetailPath)) {
+    let detailSrc = fs.readFileSync(providerDetailPath, "utf8");
+
+    // Add universal import button alongside Qoder/Cline buttons
+    const qoderBtnAnchor = `{/* Import Qoder models button — only show for qoder provider */}`;
+    const universalImportBtn = `{/* Universal Fetch Models from API button for any active connection */}
+        {connections.some((conn) => conn.isActive !== false) && (
+          <button
+            onClick={async () => {
+              const activeConn = connections.find((c) => c.isActive !== false);
+              if (!activeConn) return;
+              try {
+                const res = await fetch(\`/api/providers/\${activeConn.id}/models\`);
+                const data = await res.json();
+                if (!res.ok) {
+                  alert(data.error || translate("Failed to fetch models"));
+                  return;
+                }
+                const models = data.models || [];
+                if (models.length === 0) {
+                  alert(translate("No models returned"));
+                  return;
+                }
+                let count = 0;
+                for (const m of models) {
+                  const mId = m.id || m.name;
+                  if (!mId) continue;
+                  const exists = customModels.some(e => e.providerAlias === providerStorageAlias && e.id === mId);
+                  if (exists) continue;
+                  await handleAddCustomModel(mId, m.kind || m.type || "llm", providerStorageAlias);
+                  count++;
+                }
+                alert(translate("Successfully added") + \` \${count} \` + translate("models"));
+              } catch (err) {
+                alert("Error: " + err.message);
+              }
+            }}
+            className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-500/40 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400 transition-colors hover:border-emerald-500 hover:bg-emerald-500/5 sm:w-auto"
+            title="Auto-fetch all models from upstream API key"
+          >
+            <span className="material-symbols-outlined text-sm">cloud_download</span>
+            {translate("Fetch Models from API")}
+          </button>
+        )}
+        ` + qoderBtnAnchor;
+
+    if (!detailSrc.includes("Fetch Models from API") && detailSrc.includes(qoderBtnAnchor)) {
+      detailSrc = detailSrc.replace(qoderBtnAnchor, universalImportBtn);
+      fs.writeFileSync(providerDetailPath, detailSrc, "utf8");
+      console.log(`[Patch] Injected 'Fetch Models from API' button into Provider detail page`);
+    }
+  }
+
+  // 7. Patch "Free Only" Filter on Providers Dashboard
+  const providersPagePath = path.join(targetDir, "src/app/(dashboard)/dashboard/providers/page.js");
+  if (fs.existsSync(providersPagePath)) {
+    let pageSrc = fs.readFileSync(providersPagePath, "utf8");
+
+    // Add showFreeOnly state
+    if (!pageSrc.includes("showFreeOnly")) {
+      pageSrc = pageSrc.replace(
+        `const [statusFilter, setStatusFilter] = useState("all");`,
+        `const [statusFilter, setStatusFilter] = useState("all");
+  const [showFreeOnly, setShowFreeOnly] = useState(false);`
+      );
+
+      // Filter entries by freeOnly
+      pageSrc = pageSrc.replace(
+        `  const oauthEntries = sortByPriority(
+    Object.entries(OAUTH_PROVIDERS).filter(`,
+        `  const oauthEntries = sortByPriority(
+    Object.entries(OAUTH_PROVIDERS).filter(([k, info]) => (!showFreeOnly || info.hasFree || info.category === "free" || info.category === "freeTier")).filter(`
+      );
+
+      pageSrc = pageSrc.replace(
+        `  const apikeyEntries = Object.entries(APIKEY_PROVIDERS)
+    .filter(`,
+        `  const apikeyEntries = Object.entries(APIKEY_PROVIDERS)
+    .filter(([k, info]) => (!showFreeOnly || info.hasFree || info.category === "free" || info.category === "freeTier"))
+    .filter(`
+      );
+
+      // Inject "Free Only" Toggle UI next to statusFilter dropdown
+      const targetDropdown = `<select
+          value={statusFilter}`;
+
+      const toggleAndDropdown = `<div className="flex items-center gap-3">
+        <button
+          type="button"
+          onClick={() => setShowFreeOnly(!showFreeOnly)}
+          className={\`flex items-center gap-1.5 h-8 px-3 rounded-lg border text-xs font-medium transition-all \${
+            showFreeOnly
+              ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-600 dark:text-emerald-400 font-semibold"
+              : "border-black/10 bg-black/[0.02] text-text-muted hover:bg-black/5 dark:border-white/10 dark:bg-white/[0.03]"
+          }\`}
+        >
+          <span className="material-symbols-outlined text-[15px]">
+            {showFreeOnly ? "check_circle" : "paid"}
+          </span>
+          Free Only
+        </button>
+        <select
+          value={statusFilter}`;
+
+      pageSrc = pageSrc.replace(targetDropdown, toggleAndDropdown);
+      fs.writeFileSync(providersPagePath, pageSrc, "utf8");
+      console.log(`[Patch] Injected 'Free Only' filter toggle into Providers Dashboard`);
+    }
+  }
 }
 
 // Support CLI call
