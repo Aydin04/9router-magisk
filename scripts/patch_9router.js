@@ -125,6 +125,42 @@ function patch(targetDir) {
   const modelsRoutePath = path.join(targetDir, "src/app/api/providers/[id]/models/route.js");
   if (fs.existsSync(modelsRoutePath)) {
     let routeSrc = fs.readFileSync(modelsRoutePath, "utf8");
+
+    // 5a. Allow direct providerId fallback when no connection exists in DB (especially for No-Auth)
+    const oldConnLookup = `    const connection = await getProviderConnectionById(id);
+
+    if (!connection) {
+      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+    }`;
+
+    const newConnLookup = `    let connection = await getProviderConnectionById(id);
+
+    if (!connection) {
+      // Fallback: Check if id is a known provider (e.g. No-Auth providers without connections in DB)
+      try {
+        const { PROVIDERS } = require("open-sse/config/providers.js");
+        const prov = PROVIDERS[id];
+        if (prov) {
+          connection = {
+            id,
+            provider: id,
+            apiKey: prov.noAuth ? "no-auth" : "",
+            providerSpecificData: { baseUrl: prov.baseUrl || "" },
+            isActive: true,
+          };
+        }
+      } catch (_) {}
+    }
+
+    if (!connection) {
+      return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+    }`;
+
+    if (routeSrc.includes(oldConnLookup)) {
+      routeSrc = routeSrc.replace(oldConnLookup, newConnLookup);
+    }
+
+    // 5b. Config check & universal fallback
     const oldConfigCheck = `    const config = PROVIDER_MODELS_CONFIG[connection.provider];
     if (!config) {
       return NextResponse.json(
@@ -145,7 +181,7 @@ function patch(targetDir) {
         } catch (_) {}
       }
       
-      if (token && targetBase && /^https?:\\/\\//i.test(targetBase)) {
+      if (targetBase && /^https?:\\/\\//i.test(targetBase)) {
         let modelsUrl = targetBase.replace(/\\/+$/, "");
         modelsUrl = modelsUrl.replace(/\\/(chat\\/completions|responses|chat|messages)$/i, "");
         if (!modelsUrl.endsWith("/models")) {
@@ -166,9 +202,58 @@ function patch(targetDir) {
 
     if (routeSrc.includes(oldConfigCheck)) {
       routeSrc = routeSrc.replace(oldConfigCheck, newUniversalFallback);
-      fs.writeFileSync(modelsRoutePath, routeSrc, "utf8");
-      console.log(`[Patch] Injected Universal Models Auto-Discovery into /api/providers/[id]/models/route.js`);
     }
+
+    // 5c. Handle auth token requirement for No-Auth providers
+    const oldTokenCheck = `    // Get auth token
+    const token = connection.providerSpecificData?.copilotToken || connection.accessToken || connection.apiKey;
+    if (!token) {
+      return NextResponse.json({ error: "No valid token found" }, { status: 401 });
+    }
+
+    // Build request URL
+    let url = config.url;
+    if (config.authQuery) {
+      url += \`?\${config.authQuery}=\${token}\`;
+    }
+
+    // Build headers
+    const headers = { ...config.headers };
+    if (config.authHeader && !config.authQuery) {
+      headers[config.authHeader] = (config.authPrefix || "") + token;
+    }`;
+
+    const newTokenCheck = `    // Get auth token
+    const token = connection.providerSpecificData?.copilotToken || connection.accessToken || connection.apiKey;
+    let isNoAuthProv = connection.apiKey === "no-auth";
+    if (!isNoAuthProv && connection.provider) {
+      try {
+        const { PROVIDERS } = require("open-sse/config/providers.js");
+        if (PROVIDERS[connection.provider]?.noAuth) isNoAuthProv = true;
+      } catch (_) {}
+    }
+    if (!token && !isNoAuthProv) {
+      return NextResponse.json({ error: "No valid token found" }, { status: 401 });
+    }
+
+    // Build request URL
+    let url = config.url;
+    if (token && config.authQuery) {
+      url += \`?\${config.authQuery}=\${token}\`;
+    }
+
+    // Build headers
+    const headers = { ...config.headers };
+    if (token && config.authHeader && !config.authQuery) {
+      headers[config.authHeader] = (config.authPrefix || "") + token;
+    }`;
+
+    if (routeSrc.includes(oldTokenCheck)) {
+      routeSrc = routeSrc.replace(oldTokenCheck, newTokenCheck);
+    }
+
+    fs.writeFileSync(modelsRoutePath, routeSrc, "utf8");
+    console.log(`[Patch] Injected Universal Models Auto-Discovery & No-Auth support into /api/providers/[id]/models/route.js`);
   }
 
   // 6. Patch Provider Detail Page: "Fetch Models from API" & "Free Only" Models Filter
@@ -176,16 +261,16 @@ function patch(targetDir) {
   if (fs.existsSync(providerDetailPath)) {
     let detailSrc = fs.readFileSync(providerDetailPath, "utf8");
 
-    // 6a. Inject Universal Fetch Models button
+    // 6a. Inject Universal Fetch Models button (supports active connection OR No-Auth)
     const qoderBtnAnchor = `{/* Import Qoder models button — only show for qoder provider */}`;
-    const universalImportBtn = `{/* Universal Fetch Models from API button for any active connection */}
-        {connections.some((conn) => conn.isActive !== false) && (
+    const universalImportBtn = `{/* Universal Fetch Models from API button for any active connection or no-auth provider */}
+        {(connections.some((conn) => conn.isActive !== false) || isFreeNoAuth) && (
           <button
             onClick={async () => {
               const activeConn = connections.find((c) => c.isActive !== false);
-              if (!activeConn) return;
+              const targetEndpoint = activeConn ? \`/api/providers/\${activeConn.id}/models\` : \`/api/providers/\${providerId}/models\`;
               try {
-                const res = await fetch(\`/api/providers/\${activeConn.id}/models\`);
+                const res = await fetch(targetEndpoint);
                 const data = await res.json();
                 if (!res.ok) {
                   alert(data.error || translate("Failed to fetch models"));
@@ -211,7 +296,7 @@ function patch(targetDir) {
               }
             }}
             className="flex w-full items-center justify-center gap-1.5 rounded-lg border border-dashed border-emerald-500/40 px-3 py-2 text-xs text-emerald-600 dark:text-emerald-400 transition-colors hover:border-emerald-500 hover:bg-emerald-500/5 sm:w-auto"
-            title="Auto-fetch all models from upstream API key"
+            title="Auto-fetch all models from upstream API key or provider endpoint"
           >
             <span className="material-symbols-outlined text-sm">cloud_download</span>
             {translate("Fetch Models from API")}
@@ -298,7 +383,7 @@ function checkIsModelFree(pId, mId, isFreeFlag) {
         detailSrc = detailSrc.replace(oldModelsHeading, newModelsHeading);
       }
 
-      // Add "Disable Paid" button next to Disable All / Active All
+      // Add "Disable Paid" button next to Disable All / Active All & include customModels in allIds
       const oldModelActionButtons = `            const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
             return (
               <div className="flex gap-2">
@@ -315,8 +400,12 @@ function checkIsModelFree(pId, mId, isFreeFlag) {
               </div>
             );`;
 
-      const newModelActionButtons = `            const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
-            const paidActiveIds = allIds.filter((id) => !disabledModelIds.includes(id) && !checkIsModelFree(providerId, id, false));
+      const newModelActionButtons = `            const customIds = customModels
+              .filter((m) => m.providerAlias === providerStorageAlias && (m.kind || m.type || "llm") === "llm")
+              .map((m) => m.id);
+            const combinedIds = Array.from(new Set([...allIds, ...customIds]));
+            const activeIds = combinedIds.filter((id) => !disabledModelIds.includes(id));
+            const paidActiveIds = combinedIds.filter((id) => !disabledModelIds.includes(id) && !checkIsModelFree(providerId, id, false));
             return (
               <div className="flex flex-wrap items-center gap-2">
                 {paidActiveIds.length > 0 && (
