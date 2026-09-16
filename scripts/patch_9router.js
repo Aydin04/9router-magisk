@@ -126,14 +126,16 @@ function patch(targetDir) {
   if (fs.existsSync(modelsRoutePath)) {
     let routeSrc = fs.readFileSync(modelsRoutePath, "utf8");
 
-    // 5a. Top-level import: Add PROVIDERS to open-sse/config/providers.js import
+    // 5a. Top-level import: Add PROVIDERS, REGISTRY, and FILTERS
     const oldImport = `import { resolveOllamaLocalHost } from "open-sse/config/providers.js";`;
-    const newImport = `import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";`;
+    const newImport = `import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";
+import REGISTRY from "open-sse/providers/registry/index.js";
+import { FILTERS } from "../../suggested-models/filters.js";`;
     if (routeSrc.includes(oldImport)) {
       routeSrc = routeSrc.replace(oldImport, newImport);
     }
 
-    // 5b. Allow direct providerId fallback when no connection exists in DB (especially for No-Auth)
+    // 5b. Allow direct providerId fallback when no connection exists in DB (especially for No-Auth and all registry providers)
     const oldConnLookup = `    const connection = await getProviderConnectionById(id);
 
     if (!connection) {
@@ -141,25 +143,76 @@ function patch(targetDir) {
     }`;
 
     const newConnLookup = `    let connection = await getProviderConnectionById(id);
+    let reg = (typeof REGISTRY !== "undefined" && Array.isArray(REGISTRY))
+      ? REGISTRY.find(r => r.id === id || r.alias === id)
+      : null;
+    if (!reg && connection?.provider) {
+      reg = REGISTRY.find(r => r.id === connection.provider || r.alias === connection.provider);
+    }
 
     if (!connection) {
-      // Fallback: Check if id is a known provider (e.g. No-Auth providers without connections in DB)
-      try {
-        const prov = (typeof PROVIDERS !== "undefined" && PROVIDERS) ? PROVIDERS[id] : null;
-        if (prov) {
-          connection = {
-            id,
-            provider: id,
-            apiKey: prov.noAuth ? "no-auth" : "",
-            providerSpecificData: { baseUrl: prov.baseUrl || "" },
-            isActive: true,
-          };
-        }
-      } catch (_) {}
+      if (reg) {
+        connection = {
+          id: reg.id,
+          provider: reg.id,
+          apiKey: reg.noAuth ? "no-auth" : "",
+          providerSpecificData: {
+            baseUrl: reg.baseUrl || (reg.transport && reg.transport.baseUrl) || "",
+            ...(reg.modelsFetcher ? { modelsFetcher: reg.modelsFetcher } : {})
+          },
+          isActive: true,
+        };
+      }
     }
 
     if (!connection) {
       return NextResponse.json({ error: "Connection not found" }, { status: 404 });
+    }
+
+    // 1. Direct modelsFetcher support (e.g. OpenCode, OpenRouter, etc.)
+    const fetcherUrl = reg?.modelsFetcher?.url || connection.providerSpecificData?.modelsFetcher?.url;
+    const fetcherType = reg?.modelsFetcher?.type || connection.providerSpecificData?.modelsFetcher?.type;
+    if (fetcherUrl) {
+      try {
+        const fetchRes = await fetch(fetcherUrl, {
+          headers: { "User-Agent": "9router/1.0" },
+          signal: AbortSignal.timeout(8000),
+        });
+        if (fetchRes.ok) {
+          const fetchJson = await fetchRes.json();
+          const raw = fetchJson.data || fetchJson.models || (Array.isArray(fetchJson) ? fetchJson : []);
+          let fetchedModels = raw;
+          if (fetcherType && typeof FILTERS !== "undefined" && FILTERS[fetcherType]) {
+            fetchedModels = FILTERS[fetcherType](raw);
+          } else {
+            fetchedModels = parseOpenAIStyleModels(raw);
+          }
+          if (Array.isArray(fetchedModels) && fetchedModels.length > 0) {
+            return NextResponse.json({
+              provider: connection.provider,
+              connectionId: connection.id,
+              models: fetchedModels,
+            });
+          }
+        }
+      } catch (fetchErr) {
+        console.log(\`modelsFetcher failed for \${connection.provider}:\`, fetchErr?.message);
+      }
+    }
+
+    // 2. Direct static catalog for No-Auth providers
+    if (reg?.noAuth) {
+      const staticList = (reg.models && reg.models.length > 0)
+        ? reg.models
+        : getModelsByProviderId(connection.provider);
+      if (staticList && staticList.length > 0) {
+        return NextResponse.json({
+          provider: connection.provider,
+          connectionId: connection.id,
+          models: staticList,
+          warning: \`Loaded static catalog for \${reg.display?.name || reg.id}.\`
+        });
+      }
     }`;
 
     if (routeSrc.includes(oldConnLookup)) {
@@ -180,10 +233,8 @@ function patch(targetDir) {
       // Universal OpenAI-compatible auto-discovery for any provider
       const token = connection.providerSpecificData?.copilotToken || connection.accessToken || connection.apiKey;
       let targetBase = connection.providerSpecificData?.baseUrl || "";
-      if (!targetBase) {
-        try {
-          targetBase = (typeof PROVIDERS !== "undefined" && PROVIDERS[connection.provider]?.baseUrl) || "";
-        } catch (_) {}
+      if (!targetBase && reg) {
+        targetBase = reg.baseUrl || (reg.transport && reg.transport.baseUrl) || "";
       }
       
       if (token && targetBase && /^https?:\\/\\//i.test(targetBase)) {
@@ -195,7 +246,9 @@ function patch(targetDir) {
         config = createOpenAIModelsConfig(modelsUrl);
       } else {
         // Fallback to static catalog if no URL can be probed
-        const staticList = getStaticProviderModels(connection.provider);
+        const staticList = (reg?.models && reg.models.length > 0)
+          ? reg.models
+          : getStaticProviderModels(connection.provider);
         return NextResponse.json({
           provider: connection.provider,
           connectionId: connection.id,
@@ -230,12 +283,7 @@ function patch(targetDir) {
 
     const newTokenCheck = `    // Get auth token
     const token = connection.providerSpecificData?.copilotToken || connection.accessToken || connection.apiKey;
-    let isNoAuthProv = connection.apiKey === "no-auth";
-    if (!isNoAuthProv && connection.provider) {
-      try {
-        if (typeof PROVIDERS !== "undefined" && PROVIDERS[connection.provider]?.noAuth) isNoAuthProv = true;
-      } catch (_) {}
-    }
+    let isNoAuthProv = connection.apiKey === "no-auth" || !!reg?.noAuth;
     if (!token && !isNoAuthProv) {
       return NextResponse.json({ error: "No valid token found" }, { status: 401 });
     }
@@ -254,6 +302,40 @@ function patch(targetDir) {
 
     if (routeSrc.includes(oldTokenCheck)) {
       routeSrc = routeSrc.replace(oldTokenCheck, newTokenCheck);
+    }
+
+    // 5e. Safe fallback when live upstream fetch fails (e.g. 404 / 500)
+    const oldFetchFail = `    if (!response.ok) {
+      const errorText = await response.text();
+      console.log(\`Error fetching models from \${connection.provider}:\`, errorText);
+      return NextResponse.json(
+        { error: \`Failed to fetch models: \${response.status}\` },
+        { status: response.status }
+      );
+    }`;
+
+    const newFetchFail = `    if (!response.ok) {
+      const errorText = await response.text();
+      console.log(\`Error fetching models from \${connection.provider} (\${response.status}):\`, errorText);
+      const staticList = (reg?.models && reg.models.length > 0)
+        ? reg.models
+        : getModelsByProviderId(connection.provider);
+      if (staticList && staticList.length > 0) {
+        return NextResponse.json({
+          provider: connection.provider,
+          connectionId: connection.id,
+          models: staticList,
+          warning: \`Upstream returned HTTP \${response.status}; fallback to static catalog.\`
+        });
+      }
+      return NextResponse.json(
+        { error: \`Failed to fetch models: \${response.status}\` },
+        { status: response.status }
+      );
+    }`;
+
+    if (routeSrc.includes(oldFetchFail)) {
+      routeSrc = routeSrc.replace(oldFetchFail, newFetchFail);
     }
 
     fs.writeFileSync(modelsRoutePath, routeSrc, "utf8");
@@ -285,19 +367,27 @@ function patch(targetDir) {
                   alert(data.warning || translate("No models returned"));
                   return;
                 }
-                let count = 0;
+                const toAdd = [];
                 for (const m of models) {
                   const mId = m.id || m.name;
                   if (!mId) continue;
                   const exists = customModels.some(e => e.providerAlias === providerStorageAlias && e.id === mId);
                   if (exists) continue;
-                  await handleAddCustomModel(mId, m.kind || m.type || "llm", providerStorageAlias);
-                  count++;
+                  toAdd.push({ id: mId, type: m.kind || m.type || "llm", name: m.name || mId });
                 }
-                if (count === 0) {
+                if (toAdd.length === 0) {
                   alert(translate("All models already exist, no new models added"));
                 } else {
-                  alert(translate("Successfully added") + \` \${count} \` + translate("models"));
+                  for (const item of toAdd) {
+                    await fetch("/api/models/custom", {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ providerAlias: providerStorageAlias, id: item.id, type: item.type, name: item.name }),
+                    });
+                  }
+                  await fetchCustomModels();
+                  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+                  alert(translate("Successfully added") + \` \${toAdd.length} \` + translate("models"));
                 }
               } catch (err) {
                 alert("Error: " + err.message);
@@ -336,6 +426,12 @@ function checkIsModelFree(pId, mId, isFreeFlag) {
       // Insert after "use client";
       detailSrc = detailSrc.replace('"use client";', '"use client";\n' + catalogHelper);
 
+      // Expand isFreeNoAuth to check AI_PROVIDERS and providerInfo
+      detailSrc = detailSrc.replace(
+        "const isFreeNoAuth = !!FREE_PROVIDERS[providerId]?.noAuth;",
+        "const isFreeNoAuth = !!AI_PROVIDERS[providerId]?.noAuth || !!providerInfo?.noAuth || !!FREE_PROVIDERS[providerId]?.noAuth;"
+      );
+
       // Add showFreeModelsOnly state
       detailSrc = detailSrc.replace(
         `const [customModels, setCustomModels] = useState([]);`,
@@ -343,13 +439,151 @@ function checkIsModelFree(pId, mId, isFreeFlag) {
   const [showFreeModelsOnly, setShowFreeModelsOnly] = useState(false);`
       );
 
-      // Filter displayModels in renderModelsSection
+      // Add handleDisablePaid and enhance handleDisableAll to delete custom models like clicking 'x'
+      const oldHandleDisableAll = `  const handleDisableAll = async (ids) => {
+    if (!ids.length) return;
+    setConfirmState({
+      title: "Disable All Models",
+      message: \`Disable all \${ids.length} model(s)?\`,
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          const res = await fetch("/api/models/disabled", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ providerAlias: providerStorageAlias, ids }),
+          });
+          if (res.ok) await fetchDisabledModels();
+        } catch (error) {
+          console.log("Error disabling all models:", error);
+        }
+      }
+    });
+  };`;
+
+      const newHandleDisableAll = `  const handleDisablePaid = async (paidIds) => {
+    if (!paidIds.length) return;
+    setConfirmState({
+      title: "Disable Paid Models",
+      message: \`Disable/Remove \${paidIds.length} paid model(s)? Only free models will remain active.\`,
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          const customSet = new Set(
+            customModels
+              .filter((m) => m.providerAlias === providerStorageAlias)
+              .map((m) => m.id)
+          );
+          const customToDelete = paidIds.filter((id) => customSet.has(id));
+          const builtinToDisable = paidIds.filter((id) => !customSet.has(id));
+
+          if (customToDelete.length > 0) {
+            await Promise.all(
+              customToDelete.map((id) =>
+                fetch(\`/api/models/custom?providerAlias=\${encodeURIComponent(providerStorageAlias)}&id=\${encodeURIComponent(id)}&type=llm\`, {
+                  method: "DELETE",
+                })
+              )
+            );
+            await fetchCustomModels();
+            if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+          }
+
+          if (builtinToDisable.length > 0) {
+            await fetch("/api/models/disabled", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ providerAlias: providerStorageAlias, ids: builtinToDisable }),
+            });
+            await fetchDisabledModels();
+          }
+        } catch (error) {
+          console.log("Error disabling paid models:", error);
+        }
+      }
+    });
+  };
+
+  const handleDisableAll = async (ids) => {
+    if (!ids.length) return;
+    setConfirmState({
+      title: "Disable All Models",
+      message: \`Disable all \${ids.length} model(s)?\`,
+      onConfirm: async () => {
+        setConfirmState(null);
+        try {
+          const customSet = new Set(
+            customModels
+              .filter((m) => m.providerAlias === providerStorageAlias)
+              .map((m) => m.id)
+          );
+          const customToDelete = ids.filter((id) => customSet.has(id));
+          const builtinToDisable = ids.filter((id) => !customSet.has(id));
+
+          if (customToDelete.length > 0) {
+            await Promise.all(
+              customToDelete.map((id) =>
+                fetch(\`/api/models/custom?providerAlias=\${encodeURIComponent(providerStorageAlias)}&id=\${encodeURIComponent(id)}&type=llm\`, {
+                  method: "DELETE",
+                })
+              )
+            );
+            await fetchCustomModels();
+            if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("customModelChanged"));
+          }
+
+          if (builtinToDisable.length > 0) {
+            await fetch("/api/models/disabled", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ providerAlias: providerStorageAlias, ids: builtinToDisable }),
+            });
+            await fetchDisabledModels();
+          }
+        } catch (error) {
+          console.log("Error disabling all models:", error);
+        }
+      }
+    });
+  };`;
+
+      if (detailSrc.includes(oldHandleDisableAll)) {
+        detailSrc = detailSrc.replace(oldHandleDisableAll, newHandleDisableAll);
+      }
+
+      // Filter displayModels and customModelRows in renderModelsSection
       detailSrc = detailSrc.replace(
         `const displayModels = allModels.filter((m) => !disabledSet.has(m.id));`,
         `const filteredByFree = showFreeModelsOnly
       ? allModels.filter((m) => checkIsModelFree(providerId, m.id, m.isFree))
       : allModels;
     const displayModels = filteredByFree.filter((m) => !disabledSet.has(m.id));`
+      );
+
+      detailSrc = detailSrc.replace(
+        `const customModelRows = getProviderCustomModelRows({
+      customModels,
+      modelAliases,
+      providerAlias: providerStorageAlias,
+      builtInModels: models,
+      type: "llm",
+    });`,
+        `const customModelRows = getProviderCustomModelRows({
+      customModels,
+      modelAliases,
+      providerAlias: providerStorageAlias,
+      builtInModels: models,
+      type: "llm",
+    });
+    const visibleCustomRows = customModelRows
+      .filter((m) => !disabledSet.has(m.id))
+      .filter((m) => !showFreeModelsOnly || checkIsModelFree(providerId, m.id, false));`
+      );
+
+      // Render visibleCustomRows instead of customModelRows
+      detailSrc = detailSrc.replace(
+        `{/* Custom models first */}\n        {customModelRows.map((model) => (`,
+        `{/* Custom models first */}\n        {visibleCustomRows.map((model) => (`
       );
 
       // Pass accurate isFree prop to ModelRow for both custom and built-in models
@@ -419,7 +653,7 @@ function checkIsModelFree(pId, mId, isFreeFlag) {
                 {paidActiveIds.length > 0 && (
                   <button
                     type="button"
-                    onClick={() => handleDisableAll(paidActiveIds)}
+                    onClick={() => handleDisablePaid(paidActiveIds)}
                     className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-all"
                     title="Disable non-free models so only free ones are exposed"
                   >
@@ -1026,7 +1260,7 @@ export const DEFAULT_FREE_COMBOS = [
   const v1ModelsRoutePath = path.join(targetDir, "src/app/api/v1/models/route.js");
   if (fs.existsSync(v1ModelsRoutePath)) {
     let rSrc = fs.readFileSync(v1ModelsRoutePath, "utf8");
-    if (!rSrc.includes("const noAuthProviders = Object.values(AI_PROVIDERS).filter(p => p.noAuth);")) {
+    if (!rSrc.includes("const noAuthProviders = Object.values(AI_PROVIDERS).filter(")) {
       const oldDedupAnchor = `  const dedupedModels = [];
   const seenModelIds = new Set();
   for (const model of models) {`;
