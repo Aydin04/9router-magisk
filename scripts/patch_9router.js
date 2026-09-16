@@ -962,11 +962,45 @@ export const DEFAULT_FREE_COMBOS = [
       pageSrc = pageSrc.replace(oldFilterCombos, newFilterCombos);
     }
 
-    // Harden ComboCard safe models slicing
-    const oldModelsRender = `combo.models.slice(0, 3).map((model, index) => (`;
-    const newModelsRender = `(combo.models || []).slice(0, 3).map((model, index) => (`;
-    if (pageSrc.includes(oldModelsRender)) {
-      pageSrc = pageSrc.replace(oldModelsRender, newModelsRender);
+    // Harden ComboCard safe models slicing & length checks
+    pageSrc = pageSrc.replace(
+      /combo\.models\.length === 0/g,
+      "(!combo.models || combo.models.length === 0)"
+    );
+    pageSrc = pageSrc.replace(
+      /combo\.models\.length > 3/g,
+      "(combo.models && combo.models.length > 3)"
+    );
+    pageSrc = pageSrc.replace(
+      /combo\.models\.slice\(0, 3\)\.map/g,
+      "(combo.models || []).slice(0, 3).map"
+    );
+    pageSrc = pageSrc.replace(
+      /\`Auto — \$\{combo\.models\[0\] \|\| "first model"\}\`/g,
+      '`Auto — ${(combo.models && combo.models[0]) || "first model"}`'
+    );
+
+    // Safeguard fetchData json parsing
+    const oldFetchBody = `      const [combosRes, providersRes, settingsRes] = await Promise.all([
+        fetch("/api/combos"),
+        fetch("/api/providers"),
+        fetch("/api/settings"),
+      ]);
+      const combosData = await combosRes.json();
+      const providersData = await providersRes.json();
+      const settingsData = settingsRes.ok ? await settingsRes.json() : {};`;
+
+    const newFetchBody = `      const [combosRes, providersRes, settingsRes] = await Promise.all([
+        fetch("/api/combos").catch(() => ({ ok: false })),
+        fetch("/api/providers").catch(() => ({ ok: false })),
+        fetch("/api/settings").catch(() => ({ ok: false })),
+      ]);
+      const combosData = combosRes.ok ? await combosRes.json().catch(() => ({})) : {};
+      const providersData = providersRes.ok ? await providersRes.json().catch(() => ({})) : {};
+      const settingsData = settingsRes.ok ? await settingsRes.json().catch(() => ({})) : {};`;
+
+    if (pageSrc.includes(oldFetchBody)) {
+      pageSrc = pageSrc.replace(oldFetchBody, newFetchBody);
     }
 
     fs.writeFileSync(comboPagePath, pageSrc, "utf8");
