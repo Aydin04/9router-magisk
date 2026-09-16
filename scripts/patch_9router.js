@@ -70,14 +70,21 @@ function patch(targetDir) {
       if (existing.has(id)) continue;
 
       const filePath = path.join(registryDir, `${id}.js`);
+      const cat = prov.category === "llm" || !prov.category ? (prov.hasFree ? "freeTier" : "apikey") : prov.category;
       const fileContent = `export default {
   id: ${JSON.stringify(prov.id)},
-  name: ${JSON.stringify(prov.name || id)},
+  alias: ${JSON.stringify(prov.alias || prov.id)},
+  uiAlias: ${JSON.stringify(prov.uiAlias || prov.alias || prov.id)},
+  display: {
+    name: ${JSON.stringify(prov.name || id)},
+    icon: ${JSON.stringify(prov.icon || "bolt")},
+    color: ${JSON.stringify(prov.color || "#4F46E5")},
+    textIcon: ${JSON.stringify(prov.textIcon || id.slice(0, 2).toUpperCase())},
+    website: ${JSON.stringify(prov.website || "")}
+  },
   baseUrl: ${JSON.stringify(prov.baseUrl || "")},
   apiType: ${JSON.stringify(prov.apiType || "openai")},
-  category: ${JSON.stringify(prov.category || "llm")},
-  icon: ${JSON.stringify(prov.icon || "")},
-  color: ${JSON.stringify(prov.color || "#4F46E5")},
+  category: ${JSON.stringify(cat)},
   authModes: ${JSON.stringify(prov.authModes || ["apikey"])},
   hasFree: ${JSON.stringify(prov.hasFree || false)},
   freeTier: ${JSON.stringify(prov.freeTier || false)},
@@ -291,8 +298,57 @@ function checkIsModelFree(pId, mId, isFreeFlag) {
         detailSrc = detailSrc.replace(oldModelsHeading, newModelsHeading);
       }
 
+      // Add "Disable Paid" button next to Disable All / Active All
+      const oldModelActionButtons = `            const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
+            return (
+              <div className="flex gap-2">
+                {disabledModelIds.length > 0 && (
+                  <Button size="sm" variant="secondary" icon="restart_alt" onClick={handleEnableAll}>
+                    Active All
+                  </Button>
+                )}
+                {activeIds.length > 0 && (
+                  <Button size="sm" variant="secondary" icon="block" onClick={() => handleDisableAll(activeIds)}>
+                    Disable All
+                  </Button>
+                )}
+              </div>
+            );`;
+
+      const newModelActionButtons = `            const activeIds = allIds.filter((id) => !disabledModelIds.includes(id));
+            const paidActiveIds = allIds.filter((id) => !disabledModelIds.includes(id) && !checkIsModelFree(providerId, id, false));
+            return (
+              <div className="flex flex-wrap items-center gap-2">
+                {paidActiveIds.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => handleDisableAll(paidActiveIds)}
+                    className="flex items-center gap-1.5 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-medium text-amber-600 dark:text-amber-400 hover:bg-amber-500/20 transition-all"
+                    title="Disable non-free models so only free ones are exposed"
+                  >
+                    <span className="material-symbols-outlined text-[14px]">money_off</span>
+                    Disable Paid ({paidActiveIds.length})
+                  </button>
+                )}
+                {disabledModelIds.length > 0 && (
+                  <Button size="sm" variant="secondary" icon="restart_alt" onClick={handleEnableAll}>
+                    Active All
+                  </Button>
+                )}
+                {activeIds.length > 0 && (
+                  <Button size="sm" variant="secondary" icon="block" onClick={() => handleDisableAll(activeIds)}>
+                    Disable All
+                  </Button>
+                )}
+              </div>
+            );`;
+
+      if (detailSrc.includes(oldModelActionButtons)) {
+        detailSrc = detailSrc.replace(oldModelActionButtons, newModelActionButtons);
+      }
+
       fs.writeFileSync(providerDetailPath, detailSrc, "utf8");
-      console.log(`[Patch] Injected 'Free Only' model filter into Provider Detail Page!`);
+      console.log(`[Patch] Injected 'Free Only' model filter & 'Disable Paid' action into Provider Detail Page!`);
     }
   }
 
