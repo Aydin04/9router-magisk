@@ -824,7 +824,13 @@ export const DEFAULT_FREE_COMBOS = [
   }
 ];
 `;
-      cSrc = defaultCombosCode + cSrc;
+      // Put DEFAULT_FREE_COMBOS after imports for valid ESM
+      const importNeedle = 'import { parseJson, stringifyJson } from "../helpers/jsonCol.js";';
+      if (cSrc.includes(importNeedle)) {
+        cSrc = cSrc.replace(importNeedle, importNeedle + "\n" + defaultCombosCode);
+      } else {
+        cSrc = defaultCombosCode + cSrc;
+      }
 
       cSrc = cSrc.replace(
         `export async function getCombos() {
@@ -835,10 +841,25 @@ export const DEFAULT_FREE_COMBOS = [
         `export async function getCombos() {
   const db = await getAdapter();
   const rows = db.all(\`SELECT * FROM combos ORDER BY createdAt ASC\`);
-  const userCombos = rows.map(rowToCombo);
+  const userCombos = (rows || []).map(rowToCombo).filter(Boolean);
   const userNames = new Set(userCombos.map(c => c.name));
   const builtins = DEFAULT_FREE_COMBOS.filter(c => !userNames.has(c.name));
   return [...builtins, ...userCombos];
+}`
+      );
+
+      cSrc = cSrc.replace(
+        `export async function getComboById(id) {
+  const db = await getAdapter();
+  const row = db.get(\`SELECT * FROM combos WHERE id = ?\`, [id]);
+  return rowToCombo(row);
+}`,
+        `export async function getComboById(id) {
+  const db = await getAdapter();
+  const row = db.get(\`SELECT * FROM combos WHERE id = ?\`, [id]);
+  if (row) return rowToCombo(row);
+  const builtin = DEFAULT_FREE_COMBOS.find(c => c.id === id);
+  return builtin || null;
 }`
       );
 
@@ -911,6 +932,19 @@ export const DEFAULT_FREE_COMBOS = [
     }
   }
 
+  const comboApiIdRoutePath = path.join(targetDir, "src/app/api/combos/[id]/route.js");
+  if (fs.existsSync(comboApiIdRoutePath)) {
+    let apiIdSrc = fs.readFileSync(comboApiIdRoutePath, "utf8");
+    if (apiIdSrc.includes("const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;")) {
+      apiIdSrc = apiIdSrc.replace(
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;",
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.:/\\-]+$/;"
+      );
+      fs.writeFileSync(comboApiIdRoutePath, apiIdSrc, "utf8");
+      console.log(`[Patch] Updated VALID_NAME_REGEX in api/combos/[id]/route.js`);
+    }
+  }
+
   const comboPagePath = path.join(targetDir, "src/app/(dashboard)/dashboard/combos/page.js");
   if (fs.existsSync(comboPagePath)) {
     let pageSrc = fs.readFileSync(comboPagePath, "utf8");
@@ -919,9 +953,24 @@ export const DEFAULT_FREE_COMBOS = [
         "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;",
         "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.:/\\-]+$/;"
       );
-      fs.writeFileSync(comboPagePath, pageSrc, "utf8");
-      console.log(`[Patch] Updated VALID_NAME_REGEX in dashboard/combos/page.js`);
     }
+
+    // Harden fetchData against null/undefined combos and ensure models is an array
+    const oldFilterCombos = `if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));`;
+    const newFilterCombos = `if (combosRes.ok) setCombos((combosData.combos || []).filter(c => c && (!c.kind || c.kind === "llm")).map(c => ({ ...c, models: Array.isArray(c.models) ? c.models : [] })));`;
+    if (pageSrc.includes(oldFilterCombos)) {
+      pageSrc = pageSrc.replace(oldFilterCombos, newFilterCombos);
+    }
+
+    // Harden ComboCard safe models slicing
+    const oldModelsRender = `combo.models.slice(0, 3).map((model, index) => (`;
+    const newModelsRender = `(combo.models || []).slice(0, 3).map((model, index) => (`;
+    if (pageSrc.includes(oldModelsRender)) {
+      pageSrc = pageSrc.replace(oldModelsRender, newModelsRender);
+    }
+
+    fs.writeFileSync(comboPagePath, pageSrc, "utf8");
+    console.log(`[Patch] Hardened dashboard/combos/page.js with robust array safeguards!`);
   }
 
   // 11. Configure No-Auth Providers in Registry (opencode, theoldllm, uncloseai, duckduckgo-web, felo-web, mimo-free)
