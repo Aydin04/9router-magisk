@@ -126,7 +126,14 @@ function patch(targetDir) {
   if (fs.existsSync(modelsRoutePath)) {
     let routeSrc = fs.readFileSync(modelsRoutePath, "utf8");
 
-    // 5a. Allow direct providerId fallback when no connection exists in DB (especially for No-Auth)
+    // 5a. Top-level import: Add PROVIDERS to open-sse/config/providers.js import
+    const oldImport = `import { resolveOllamaLocalHost } from "open-sse/config/providers.js";`;
+    const newImport = `import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";`;
+    if (routeSrc.includes(oldImport)) {
+      routeSrc = routeSrc.replace(oldImport, newImport);
+    }
+
+    // 5b. Allow direct providerId fallback when no connection exists in DB (especially for No-Auth)
     const oldConnLookup = `    const connection = await getProviderConnectionById(id);
 
     if (!connection) {
@@ -138,8 +145,7 @@ function patch(targetDir) {
     if (!connection) {
       // Fallback: Check if id is a known provider (e.g. No-Auth providers without connections in DB)
       try {
-        const { PROVIDERS } = require("open-sse/config/providers.js");
-        const prov = PROVIDERS[id];
+        const prov = (typeof PROVIDERS !== "undefined" && PROVIDERS) ? PROVIDERS[id] : null;
         if (prov) {
           connection = {
             id,
@@ -160,7 +166,7 @@ function patch(targetDir) {
       routeSrc = routeSrc.replace(oldConnLookup, newConnLookup);
     }
 
-    // 5b. Config check & universal fallback
+    // 5c. Config check & universal fallback
     const oldConfigCheck = `    const config = PROVIDER_MODELS_CONFIG[connection.provider];
     if (!config) {
       return NextResponse.json(
@@ -176,12 +182,11 @@ function patch(targetDir) {
       let targetBase = connection.providerSpecificData?.baseUrl || "";
       if (!targetBase) {
         try {
-          const { PROVIDERS } = require("open-sse/config/providers.js");
-          targetBase = PROVIDERS[connection.provider]?.baseUrl || "";
+          targetBase = (typeof PROVIDERS !== "undefined" && PROVIDERS[connection.provider]?.baseUrl) || "";
         } catch (_) {}
       }
       
-      if (targetBase && /^https?:\\/\\//i.test(targetBase)) {
+      if (token && targetBase && /^https?:\\/\\//i.test(targetBase)) {
         let modelsUrl = targetBase.replace(/\\/+$/, "");
         modelsUrl = modelsUrl.replace(/\\/(chat\\/completions|responses|chat|messages)$/i, "");
         if (!modelsUrl.endsWith("/models")) {
@@ -204,7 +209,7 @@ function patch(targetDir) {
       routeSrc = routeSrc.replace(oldConfigCheck, newUniversalFallback);
     }
 
-    // 5c. Handle auth token requirement for No-Auth providers
+    // 5d. Handle auth token requirement for No-Auth providers
     const oldTokenCheck = `    // Get auth token
     const token = connection.providerSpecificData?.copilotToken || connection.accessToken || connection.apiKey;
     if (!token) {
@@ -228,8 +233,7 @@ function patch(targetDir) {
     let isNoAuthProv = connection.apiKey === "no-auth";
     if (!isNoAuthProv && connection.provider) {
       try {
-        const { PROVIDERS } = require("open-sse/config/providers.js");
-        if (PROVIDERS[connection.provider]?.noAuth) isNoAuthProv = true;
+        if (typeof PROVIDERS !== "undefined" && PROVIDERS[connection.provider]?.noAuth) isNoAuthProv = true;
       } catch (_) {}
     }
     if (!token && !isNoAuthProv) {
@@ -278,7 +282,7 @@ function patch(targetDir) {
                 }
                 const models = data.models || [];
                 if (models.length === 0) {
-                  alert(translate("No models returned"));
+                  alert(data.warning || translate("No models returned"));
                   return;
                 }
                 let count = 0;
@@ -290,7 +294,11 @@ function patch(targetDir) {
                   await handleAddCustomModel(mId, m.kind || m.type || "llm", providerStorageAlias);
                   count++;
                 }
-                alert(translate("Successfully added") + \` \${count} \` + translate("models"));
+                if (count === 0) {
+                  alert(translate("All models already exist, no new models added"));
+                } else {
+                  alert(translate("Successfully added") + \` \${count} \` + translate("models"));
+                }
               } catch (err) {
                 alert("Error: " + err.message);
               }
@@ -741,16 +749,22 @@ export const DEFAULT_FREE_COMBOS = [
     const rFile = path.join(registryDir, filename);
     if (fs.existsSync(rFile)) {
       let rSrc = fs.readFileSync(rFile, "utf8");
+      let changed = false;
       if (!rSrc.includes("noAuth: true")) {
         rSrc = rSrc.replace(/category:\s*["\x27][^"\x27]+["\x27],?/, `category: "${info.category}",\n  noAuth: true,`);
-        if (info.alias) {
-          rSrc = rSrc.replace(/alias:\s*["\x27][^"\x27]+["\x27],?/, `alias: "${info.alias}",\n  uiAlias: "${info.alias}",`);
-        }
-        if (info.models && info.models.length > 0) {
-          rSrc = rSrc.replace(/models:\s*\[[\s\S]*?\],/, `models: ${JSON.stringify(info.models, null, 2)},`);
-        }
+        changed = true;
+      }
+      if (info.alias && !rSrc.includes(`alias: "${info.alias}"`)) {
+        rSrc = rSrc.replace(/alias:\s*["\x27][^"\x27]+["\x27],?/, `alias: "${info.alias}",\n  uiAlias: "${info.alias}",`);
+        changed = true;
+      }
+      if (info.models && info.models.length > 0 && !rSrc.includes("models:")) {
+        rSrc = rSrc.replace(/category:/, `models: ${JSON.stringify(info.models, null, 2)},\n  category:`);
+        changed = true;
+      }
+      if (changed) {
         fs.writeFileSync(rFile, rSrc, "utf8");
-        console.log(`[Patch] Updated ${filename} to noAuth: true`);
+        console.log(`[Patch] Updated ${filename} to noAuth & populated models!`);
       }
     }
   }
