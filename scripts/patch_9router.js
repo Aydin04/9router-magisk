@@ -1809,6 +1809,97 @@ export async function POST(request) {
       }
     }
   }
+
+  // 19. Patch testUtils.js: Universal API Key testing for all 385 ported providers
+  const testUtilsPath = path.join(targetDir, "src/app/api/providers/[id]/test/testUtils.js");
+  if (fs.existsSync(testUtilsPath)) {
+    let tSrc = fs.readFileSync(testUtilsPath, "utf8");
+    const oldDefaultCase = `      default:
+        return { valid: false, error: "Provider test not supported" };`;
+
+    const newDefaultCase = `      default: {
+        // Universal tester for all 385+ ported providers
+        const regConfig = PROVIDERS[connection.provider];
+        const rawBase = connection.providerSpecificData?.baseUrl || regConfig?.baseUrl || regConfig?.validateUrl;
+        if (!rawBase) {
+          return { valid: false, error: "Provider test not supported" };
+        }
+
+        let testUrl = regConfig?.validateUrl || rawBase;
+        if (testUrl.includes("/chat/completions")) {
+          testUrl = testUrl.replace(/\\/chat\\/completions$/, "/models");
+        } else if (testUrl.includes("/messages")) {
+          testUrl = testUrl.replace(/\\/messages$/, "/models");
+        } else if (!testUrl.endsWith("/models") && !testUrl.includes("?")) {
+          testUrl = testUrl.replace(/\\/+$/, "") + "/models";
+        }
+
+        const isAnthropic = regConfig?.format === "anthropic" || connection.provider.startsWith("anthropic-");
+        const headers = isAnthropic
+          ? {
+              "x-api-key": connection.apiKey,
+              "anthropic-version": "2023-06-01",
+              "Authorization": \`Bearer \${connection.apiKey}\`,
+              "Content-Type": "application/json",
+            }
+          : {
+              "Authorization": \`Bearer \${connection.apiKey}\`,
+              "Content-Type": "application/json",
+            };
+
+        if (regConfig?.headers) {
+          Object.assign(headers, regConfig.headers);
+        }
+
+        const probeRes = await fetchWithConnectionProxy(testUrl, {
+          method: "GET",
+          headers,
+        }, effectiveProxy);
+
+        // If /models returned 200 OK -> key is valid!
+        if (probeRes.ok) {
+          return { valid: true, error: null };
+        }
+
+        // If 401 or 403, key is definitively rejected
+        if (probeRes.status === 401 || probeRes.status === 403) {
+          return { valid: false, error: "Invalid API key" };
+        }
+
+        // If /models endpoint returned 404 or 405 (some providers don't have GET /models),
+        // fallback to sending a minimal 1-token dummy chat request to test the key
+        if (probeRes.status === 404 || probeRes.status === 405) {
+          const chatUrl = rawBase.includes("/chat/completions") || rawBase.includes("/messages")
+            ? rawBase
+            : rawBase.replace(/\\/+$/, "") + (isAnthropic ? "/v1/messages" : "/v1/chat/completions");
+
+          const fallbackModel = getDefaultModel(connection.provider) || "gpt-3.5-turbo";
+          const chatBody = isAnthropic
+            ? JSON.stringify({ model: fallbackModel, max_tokens: 1, messages: [{ role: "user", content: "hi" }] })
+            : JSON.stringify({ model: fallbackModel, max_tokens: 1, messages: [{ role: "user", content: "hi" }] });
+
+          const chatRes = await fetchWithConnectionProxy(chatUrl, {
+            method: "POST",
+            headers,
+            body: chatBody,
+          }, effectiveProxy);
+
+          // If chat endpoint didn't reject auth (not 401/403), then key is valid!
+          if (chatRes.status !== 401 && chatRes.status !== 403) {
+            return { valid: true, error: null };
+          }
+          return { valid: false, error: "Invalid API key" };
+        }
+
+        return { valid: false, error: \`API returned \${probeRes.status}\` };
+      }`;
+
+    if (tSrc.includes(oldDefaultCase)) {
+      tSrc = tSrc.replace(oldDefaultCase, newDefaultCase);
+      fs.writeFileSync(testUtilsPath, tSrc, "utf8");
+      console.log(`[Patch] Injected Universal API Key tester into testUtils.js!`);
+    }
+  }
 }
 
 // Support CLI call
