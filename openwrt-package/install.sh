@@ -22,47 +22,87 @@ elif which opkg >/dev/null 2>&1; then
     echo "  -> Detected Package Manager: opkg (OpenWrt <= 24.x)"
 fi
 
-if ! which node >/dev/null 2>&1; then
-    echo "[!] Node.js not found. Installing node via $PKG_MGR..."
-    if [ "$PKG_MGR" = "apk" ]; then
-        apk update || true
-        apk upgrade || true
-        if ! apk add nodejs; then
-            apk add node || true
-        fi
-    elif [ "$PKG_MGR" = "opkg" ]; then
-        opkg update || true
-        # Upgrade installed packages if possible
-        opkg upgrade node 2>/dev/null || true
-        if ! opkg install node; then
-            opkg install nodejs || true
-        fi
-    else
-        echo "[!] Neither apk nor opkg found. Checking system node..."
-    fi
+# Detect Architecture for Standalone Fallback
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64|amd64)
+        NODE_STANDALONE_URL="https://unofficial-builds.nodejs.org/download/release/v20.18.0/node-v20.18.0-linux-x64-musl.tar.gz"
+        ;;
+    aarch64|arm64)
+        NODE_STANDALONE_URL="https://unofficial-builds.nodejs.org/download/release/v20.18.0/node-v20.18.0-linux-arm64-musl.tar.gz"
+        ;;
+    armv7*|armhf)
+        NODE_STANDALONE_URL="https://unofficial-builds.nodejs.org/download/release/v20.18.0/node-v20.18.0-linux-armv7l-musl.tar.gz"
+        ;;
+    *)
+        NODE_STANDALONE_URL=""
+        ;;
+esac
+
+INSTALL_DIR="/usr/share/9router"
+DATA_DIR="/etc/9router-data"
+mkdir -p "$INSTALL_DIR" "$INSTALL_DIR/bin" "$DATA_DIR" "$DATA_DIR/tmp"
+
+# 1. Check if Node is already installed in system or in /usr/share/9router/bin
+if [ -x "$INSTALL_DIR/bin/node" ]; then
+    NODE_BIN="$INSTALL_DIR/bin/node"
+elif which node >/dev/null 2>&1; then
+    NODE_BIN="$(which node)"
 else
-    # Update package index and upgrade node to latest available if desired
+    NODE_BIN=""
+fi
+
+if [ -z "$NODE_BIN" ]; then
+    echo "[!] Node.js not found. Attempting to install via $PKG_MGR..."
     if [ "$PKG_MGR" = "apk" ]; then
         apk update || true
-        apk upgrade nodejs 2>/dev/null || apk upgrade node 2>/dev/null || true
+        if ! apk add nodejs 2>/dev/null; then
+            apk add node 2>/dev/null || true
+        fi
     elif [ "$PKG_MGR" = "opkg" ]; then
         opkg update || true
-        opkg upgrade node 2>/dev/null || opkg upgrade nodejs 2>/dev/null || true
+        if ! opkg install node 2>/dev/null; then
+            opkg install nodejs 2>/dev/null || true
+        fi
+    fi
+
+    # Re-check after package manager attempt
+    if which node >/dev/null 2>&1; then
+        NODE_BIN="$(which node)"
     fi
 fi
 
-if ! which node >/dev/null 2>&1; then
-    echo "[ERROR] Node.js could not be installed automatically!"
-    if [ "$PKG_MGR" = "apk" ]; then
-        echo "Please run manually: apk update && apk add nodejs"
-    else
-        echo "Please run manually: opkg update && opkg install node"
+# Fallback: If repo doesn't carry node (common in OpenWrt 25 snapshots/base releases),
+# download official precompiled musl Node.js binary into /usr/share/9router/bin/node
+if [ -z "$NODE_BIN" ] && [ -n "$NODE_STANDALONE_URL" ]; then
+    echo "[!] Official repo does not provide nodejs for $PKG_MGR."
+    echo "[+] Downloading precompiled standalone Node.js (musl / $ARCH)..."
+    TMP_NODE_TAR="/tmp/node-standalone.tar.gz"
+    
+    if wget -qO "$TMP_NODE_TAR" "$NODE_STANDALONE_URL" 2>/dev/null || curl -sL -o "$TMP_NODE_TAR" "$NODE_STANDALONE_URL" 2>/dev/null; then
+        echo "  -> Extracting standalone node binary to $INSTALL_DIR/bin/node..."
+        tar -xzf "$TMP_NODE_TAR" --strip-components=2 -C "$INSTALL_DIR/bin" "*/bin/node" 2>/dev/null || \
+        tar -xzf "$TMP_NODE_TAR" -C "/tmp" && mv -f /tmp/node-*/bin/node "$INSTALL_DIR/bin/node" 2>/dev/null || true
+        rm -rf "$TMP_NODE_TAR" /tmp/node-*
+        
+        if [ -x "$INSTALL_DIR/bin/node" ]; then
+            chmod +x "$INSTALL_DIR/bin/node"
+            # Create symlink in /usr/bin if writable
+            [ ! -f /usr/bin/node ] && ln -sf "$INSTALL_DIR/bin/node" /usr/bin/node 2>/dev/null || true
+            NODE_BIN="$INSTALL_DIR/bin/node"
+            echo "  -> Standalone Node.js installed successfully!"
+        fi
     fi
+fi
+
+if [ -z "$NODE_BIN" ] || ! "$NODE_BIN" -v >/dev/null 2>&1; then
+    echo "[ERROR] Node.js is required but could not be installed automatically for $ARCH."
+    echo "Please install nodejs or place node binary at /usr/bin/node or $INSTALL_DIR/bin/node."
     exit 1
 fi
 
-NODE_VERSION=$(node -v 2>/dev/null || echo "unknown")
-echo "  -> Node.js ready: $NODE_VERSION"
+NODE_VERSION=$("$NODE_BIN" -v 2>/dev/null || echo "unknown")
+echo "  -> Node.js ready ($NODE_BIN): $NODE_VERSION"
 
 # 2. Setup Directories
 echo "[2/5] Creating directories..."

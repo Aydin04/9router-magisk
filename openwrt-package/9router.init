@@ -25,14 +25,16 @@ start_service() {
     [ "$enabled" -eq 1 ] || return 0
 
     local NODE_BIN=""
-    if [ -x "/usr/bin/node" ]; then
+    if [ -x "$PROG_DIR/bin/node" ]; then
+        NODE_BIN="$PROG_DIR/bin/node"
+    elif [ -x "/usr/bin/node" ]; then
         NODE_BIN="/usr/bin/node"
     elif which node >/dev/null 2>&1; then
         NODE_BIN="$(which node)"
     fi
 
     if [ -z "$NODE_BIN" ]; then
-        echo "[ERROR] Node.js is required! Please run: opkg update && opkg install node"
+        echo "[ERROR] Node.js is required! Please run installer again or install node."
         return 1
     fi
 
