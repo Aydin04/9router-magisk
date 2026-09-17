@@ -127,11 +127,11 @@ function patch(targetDir) {
     let routeSrc = fs.readFileSync(modelsRoutePath, "utf8");
 
     // 5a. Top-level import: Add PROVIDERS, REGISTRY, FILTERS, and getProviderConnections
-    const oldImport = `import { getProviderConnectionById } from "@/models";`;
-    const newImport = `import { getProviderConnectionById, getProviderConnections } from "@/models";
-import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";
+    const oldImport = `import { resolveOllamaLocalHost } from "open-sse/config/providers.js";`;
+    const newImport = `import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";
 import REGISTRY from "open-sse/providers/registry/index.js";
-import { FILTERS } from "../../suggested-models/filters.js";`;
+import { FILTERS } from "../../suggested-models/filters.js";
+import { getProviderConnections } from "@/models";`;
     if (routeSrc.includes(oldImport)) {
       routeSrc = routeSrc.replace(oldImport, newImport);
     }
