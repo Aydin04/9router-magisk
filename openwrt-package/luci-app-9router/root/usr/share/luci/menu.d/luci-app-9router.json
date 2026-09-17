@@ -24,5 +24,13 @@
 			"type": "view",
 			"path": "9router/config"
 		}
+	},
+	"admin/services/9router/log": {
+		"title": "Logs",
+		"order": 3,
+		"action": {
+			"type": "view",
+			"path": "9router/log"
+		}
 	}
 }

@@ -112,7 +112,7 @@ jobs:
 
           # Package 9router OpenWrt release package (includes core + procd init + uci config + luci-app-9router + installer)
           mkdir -p dist/openwrt-bundle/usr/share/9router
-          cp -rf dist/app-bundle/9router/* dist/openwrt-bundle/usr/share/9router/
+          cp -rf dist/app-bundle/9router/. dist/openwrt-bundle/usr/share/9router/
           mkdir -p dist/openwrt-bundle/etc/init.d dist/openwrt-bundle/etc/config
           cp -f openwrt-package/9router.init dist/openwrt-bundle/etc/init.d/9router
           cp -f openwrt-package/9router.config dist/openwrt-bundle/etc/config/9router
@@ -121,7 +121,7 @@ jobs:
           chmod +x dist/openwrt-bundle/etc/init.d/9router dist/openwrt-bundle/install.sh
 
           cd dist/openwrt-bundle
-          tar -czf ../9router-openwrt.tar.gz *
+          tar -czf ../9router-openwrt.tar.gz .
           cd ../..
           ls -lh dist/9router-openwrt.tar.gz
 

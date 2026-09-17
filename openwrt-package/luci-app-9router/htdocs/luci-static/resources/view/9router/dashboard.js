@@ -4,6 +4,10 @@
 'require form';
 
 return view.extend({
+	load: function() {
+		return uci.load('9router');
+	},
+
 	render: function() {
 		var port = uci.get('9router', 'config', 'port') || '20128';
 		var host = window.location.hostname;
