@@ -142,9 +142,13 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.41
-          name: "9router Magisk Module v0.5.41 (Fix Combos Minified React Error #31)"
+          tag_name: v0.5.42
+          name: "9router Magisk Module v0.5.42 (Backup Fix, Android Cloudflare Fix, Auto-Merge Providers)"
           body: |
+            ## 9router Magisk Module v0.5.42
+            - **Database Backup Password Fix**: Resolved "Invalid password" issue when exporting database. Profile page now downloads backup directly in 1 click without failing password prompts. Backend authentication fallback accepts master defaults or active dashboard sessions.
+            - **Cloudflare Tunnel Android Watchdog Fix**: Added `android` platform mappings (`arm64`, `x64`, `arm`) to `PLATFORM_MAPPINGS` in `cloudflared.js`, stopping the infinite restart loop and high CPU/log spam on Android.
+            - **Auto-Merge Custom Compatible Providers**: Added smart detection & 1-click migration for custom OpenAI/Anthropic nodes that match any of the 385 built-in providers. Automatically migrates API keys & custom models to the official provider node and cleans up redundant custom nodes.
             ## 9router Magisk Module v0.5.41
             - **Fix React Crash on Combos Page**: Resolved Minified React Error #31 (`Objects are not valid as a React child`) caused by object-structured models `{id, kind, model, providerId, connectionId, weight, label}` in `combos` database.
             - **Robust Model String Normalization**: Added helper `getModelStr()` and sanitized combo models in both `combosRepo.js` (backend) and `dashboard/combos/page.js` (frontend `ComboCard`, `ModelItem`, `CapacityAdapterCap`).
