@@ -1,0 +1,90 @@
+#!/bin/sh /etc/rc.common
+# 9router AI Gateway procd init script for OpenWrt
+START=95
+STOP=10
+USE_PROCD=1
+
+PROG_DIR="/usr/share/9router"
+DATA_DIR="/etc/9router-data"
+LOG_FILE="/var/log/9router.log"
+
+start_service() {
+    config_load 9router
+
+    local enabled port bind_host require_auth api_key admin_password enable_ui ram_limit cfg_data_dir
+    config_get_bool enabled config enabled 1
+    config_get port config port "20128"
+    config_get bind_host config bind_host "0.0.0.0"
+    config_get_bool require_auth config require_auth 1
+    config_get api_key config api_key "dsh-local-key"
+    config_get admin_password config admin_password "admin123"
+    config_get_bool enable_ui config enable_ui 1
+    config_get ram_limit config ram_limit "256"
+    config_get cfg_data_dir config data_dir "$DATA_DIR"
+
+    [ "$enabled" -eq 1 ] || return 0
+
+    local NODE_BIN=""
+    if [ -x "/usr/bin/node" ]; then
+        NODE_BIN="/usr/bin/node"
+    elif which node >/dev/null 2>&1; then
+        NODE_BIN="$(which node)"
+    fi
+
+    if [ -z "$NODE_BIN" ]; then
+        echo "[ERROR] Node.js is required! Please run: opkg update && opkg install node"
+        return 1
+    fi
+
+    mkdir -p "$cfg_data_dir" "$cfg_data_dir/tmp" /var/log
+
+    # Prepare environment
+    local auth_req_str="false"
+    [ "$require_auth" -eq 1 ] && auth_req_str="true"
+
+    procd_open_instance "9router"
+    procd_set_param command "$NODE_BIN" \
+        --max-old-space-size="$ram_limit" \
+        --max-semi-space-size=2 \
+        --optimize-for-size \
+        "$PROG_DIR/custom-server.js"
+
+    procd_set_param respawn 3600 5 0
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+
+    # Security & Ports
+    procd_set_param env PORT="$port"
+    procd_set_param env HOST="$bind_host"
+    procd_set_param env HOME="$cfg_data_dir"
+    procd_set_param env TMPDIR="$cfg_data_dir/tmp"
+    procd_set_param env DATA_DIR="$cfg_data_dir"
+    procd_set_param env UV_THREADPOOL_SIZE=2
+    procd_set_param env NEXT_MANUAL_SIG_HANDLE=true
+
+    if [ "$require_auth" -eq 1 ]; then
+        procd_set_param env REQUIRE_API_KEY="true"
+        procd_set_param env ROUTER_API_KEY="$api_key"
+        procd_set_param env NINEROUTER_API_KEY="$api_key"
+        procd_set_param env INITIAL_PASSWORD="$admin_password"
+    else
+        procd_set_param env REQUIRE_API_KEY="false"
+        procd_set_param env ROUTER_API_KEY="dsh-local-key"
+        procd_set_param env NINEROUTER_API_KEY="dsh-local-key"
+    fi
+
+    if [ "$enable_ui" -eq 1 ]; then
+        procd_set_param env NINEROUTER_ENABLE_LIVE_WS=1
+        procd_set_param env DISABLE_DASHBOARD_SSR=0
+    else
+        procd_set_param env NINEROUTER_ENABLE_LIVE_WS=0
+        procd_set_param env DISABLE_DASHBOARD_SSR=1
+    fi
+
+    procd_set_param user root
+    procd_close_instance
+}
+
+service_triggers() {
+    procd_add_reload_trigger "9router"
+}

@@ -107,9 +107,24 @@ jobs:
           find . -type d \( -name "tests" -o -name "__tests__" -o -name ".github" -o -name ".git" \) -exec rm -rf {} + 2>/dev/null || true
           cd ../../..
 
-          # Package 9router core into a fast-streaming tar.gz
+          # Package 9router core into a fast-streaming tar.gz for Magisk
           tar -czf dist/9router-module/9router.tar.gz -C dist/app-bundle 9router
-          rm -rf dist/app-bundle
+
+          # Package 9router OpenWrt release package (includes core + procd init + uci config + installer)
+          mkdir -p dist/openwrt-bundle/usr/share/9router
+          cp -rf dist/app-bundle/9router/* dist/openwrt-bundle/usr/share/9router/
+          mkdir -p dist/openwrt-bundle/etc/init.d dist/openwrt-bundle/etc/config
+          cp -f openwrt-package/9router.init dist/openwrt-bundle/etc/init.d/9router
+          cp -f openwrt-package/9router.config dist/openwrt-bundle/etc/config/9router
+          cp -f openwrt-package/install.sh dist/openwrt-bundle/install.sh
+          chmod +x dist/openwrt-bundle/etc/init.d/9router dist/openwrt-bundle/install.sh
+
+          cd dist/openwrt-bundle
+          tar -czf ../9router-openwrt.tar.gz *
+          cd ../..
+          ls -lh dist/9router-openwrt.tar.gz
+
+          rm -rf dist/app-bundle dist/openwrt-bundle
 
       - name: Download & Bundle Android ARM64 Node.js Runtime
         run: |
@@ -142,44 +157,25 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.46
-          name: "9router Magisk Module v0.5.46 (Universal Provider Validation & Dynamic Models for 385+ Ported Providers)"
+          tag_name: v0.5.47
+          name: "9router v0.5.47 (OpenWrt Support & Magisk Universal Provider Port)"
           body: |
+            ## 9router v0.5.47
+            - **Official OpenWrt Support**:
+              - Added dedicated OpenWrt bundle `9router-openwrt.tar.gz`.
+              - Native OpenWrt `procd` init script (`/etc/init.d/9router`) with automatic process supervision, respawn, and reload triggers.
+              - Unified UCI configuration (`/etc/config/9router`) supporting `port`, `bind_host`, `require_auth`, `api_key`, `admin_password`, and `ram_limit`.
+              - 1-Click install script (`install.sh`) supporting instant setup on OpenWrt (x86_64, aarch64, arm, mips).
+            - **Strict Security & Authentication Preserved**:
+              - Full API key validation (`REQUIRE_API_KEY=true`) and initial admin password enforcement (`INITIAL_PASSWORD`) enabled by default.
+              - Remote requests require valid API Key (`Authorization: Bearer <key>` or `x-api-key`).
+              - Dashboard protected with admin login credentials.
+            - **Universal 385+ Ported Providers**:
+              - Complete provider transport definitions, dynamic live model discovery, and universal validation probes included.
             ## 9router Magisk Module v0.5.46
-            - **Universal API Key Validation for Ported Providers (`/api/providers/validate`)**:
-              - Fixed `failed: Provider test not supported` when entering or checking API keys in modal dialogs.
-              - Upstream validate route only supported OpenAI format with strict `cfg.format === "openai"`, causing ported providers (and Anthropic-format providers) to immediately error.
-              - Injected universal probe logic into `/api/providers/validate` supporting all 385+ providers with OpenAI and Anthropic headers, fallback to registry endpoints (`validateUrl` / `baseUrl`), and 1-token probe.
-            - **Enhanced Transport & Endpoints in Extracted Providers**:
-              - Updated `extracted_providers.json` and registry generator so all 347 ported providers include valid `transport` configs (`baseUrl`, `validateUrl`, `format`) and pre-bundled models from upstream router.
-            - **Dynamic Live Model Discovery**:
-              - Ensured `/api/providers/[id]/models` resolves live upstream `/models` across all ported providers without falling back to static catalog.
-            ## 9router Magisk Module v0.5.45
-            - **Live Dynamic Model Fetching for All 385+ Ported Providers**: Upgraded the "Fetch Models from API" button and backend `/api/providers/[id]/models` route.
-            ## 9router Magisk Module v0.5.44
-            - **Universal API Key Testing Support for 385+ Ported Providers**: Added universal `/models` and minimal chat probe testing fallback using registry endpoints (`validateUrl` / `baseUrl`).
-            ## 9router Magisk Module v0.5.43
-            - **Fix Providers Page Crash**: Resolved `ReferenceError: can't access lexical declaration 'connections' before initialization` on `/dashboard/providers` caused by TDZ (Temporal Dead Zone) hook placement.
-            ## 9router Magisk Module v0.5.42
-            - **Database Backup Password Fix**: Resolved "Invalid password" issue when exporting database. Profile page now downloads backup directly in 1 click without failing password prompts. Backend authentication fallback accepts master defaults or active dashboard sessions.
-            - **Cloudflare Tunnel Android Watchdog Fix**: Added `android` platform mappings (`arm64`, `x64`, `arm`) to `PLATFORM_MAPPINGS` in `cloudflared.js`, stopping the infinite restart loop and high CPU/log spam on Android.
-            - **Auto-Merge Custom Compatible Providers**: Added smart detection & 1-click migration for custom OpenAI/Anthropic nodes that match any of the 385 built-in providers. Automatically migrates API keys & custom models to the official provider node and cleans up redundant custom nodes.
-            ## 9router Magisk Module v0.5.41
-            - **Fix React Crash on Combos Page**: Resolved Minified React Error #31 (`Objects are not valid as a React child`) caused by object-structured models `{id, kind, model, providerId, connectionId, weight, label}` in `combos` database.
-            - **Robust Model String Normalization**: Added helper `getModelStr()` and sanitized combo models in both `combosRepo.js` (backend) and `dashboard/combos/page.js` (frontend `ComboCard`, `ModelItem`, `CapacityAdapterCap`).
-            - **Built-in Free Combos Support**: Pre-populated free combos (`auto/best-free`, `best-free`, `auto/coding:free`, `coding-free`, `auto/fast:free`, `fast-free`).
-            ## 9router Magisk Module v0.5.39 (Cleaned & Optimized)
-            - **🧹 Aggressive Build Junk Purge**:
-              - Removed duplicate nested `.next/standalone` folder (~68MB saved).
-              - Removed non-ARM64 / x64 host platform native binaries (`sharp-libvips-linux-x64`) (~18MB saved).
-              - Removed build trace profiles (`.next/trace`) (~5.3MB saved).
-              - Removed 1,600+ useless `.ts`/`.d.ts` source files, sourcemaps (`.map`), and `.nft.json` trace files.
-              - Saves ~100MB of uncompressed storage & RAM footprint on Android!
-            - **🔧 Intact Production Build**: Kept all critical production manifests (`BUILD_ID`, `routes-manifest.json`, `server/` routes).
-            - **⚡ Ultra-Fast RAM Streaming Extraction**: 9router core is streamed directly via RAM pipe (`unzip -p | tar -xz`) in ~5s.
-            - **📊 Live Interactive Progress**: Uses `SKIPUNZIP=1` with clear step indicators (`[1/4]`, `[2/4]`, `[3/4]`, `[4/4]`).
-            - **100% Standalone Android Bionic Node.js**: Built-in ARM64 Node.js runtime + libraries (`libcrypto`, `libssl`, `libcares`, `libicu`, `libc++_shared`, CA bundle).
-            - **123+ AI Providers & Web UI Control Center on Port 20129**.
-          files: dist/9router-magisk-module.zip
+            - **Universal API Key Validation for Ported Providers (`/api/providers/validate`)**: Universal probe logic for all 385+ ported providers with OpenAI & Anthropic headers.
+          files: |
+            dist/9router-magisk-module.zip
+            dist/9router-openwrt.tar.gz
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
