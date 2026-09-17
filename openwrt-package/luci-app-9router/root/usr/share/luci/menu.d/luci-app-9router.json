@@ -1,0 +1,28 @@
+{
+	"admin/services/9router": {
+		"title": "9router AI",
+		"action": {
+			"type": "view",
+			"path": "9router/dashboard"
+		},
+		"depends": {
+			"acl": [ "luci-app-9router" ]
+		}
+	},
+	"admin/services/9router/dashboard": {
+		"title": "Dashboard",
+		"order": 1,
+		"action": {
+			"type": "view",
+			"path": "9router/dashboard"
+		}
+	},
+	"admin/services/9router/config": {
+		"title": "Settings",
+		"order": 2,
+		"action": {
+			"type": "view",
+			"path": "9router/config"
+		}
+	}
+}

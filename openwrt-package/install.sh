@@ -156,21 +156,36 @@ fi
 chmod +x /etc/init.d/9router
 chmod -R 0755 "$INSTALL_DIR"
 
-# 5. Enable & Start Service
-echo "[5/5] Enabling and starting 9router service..."
+# 5. Install LuCI App (Dashboard & Settings inside LuCI)
+echo "[5/6] Installing LuCI App (luci-app-9router)..."
+if [ -d "$SCRIPT_DIR/luci-app-9router" ]; then
+    cp -rf "$SCRIPT_DIR/luci-app-9router/root/"* / 2>/dev/null || true
+    cp -rf "$SCRIPT_DIR/luci-app-9router/htdocs/"* /www/ 2>/dev/null || true
+elif [ -d "$INSTALL_DIR/luci-app-9router" ]; then
+    cp -rf "$INSTALL_DIR/luci-app-9router/root/"* / 2>/dev/null || true
+    cp -rf "$INSTALL_DIR/luci-app-9router/htdocs/"* /www/ 2>/dev/null || true
+fi
+
+# Reload LuCI and RPCD ACLs
+rm -f /tmp/luci-indexcache /tmp/luci-modulecache/* 2>/dev/null || true
+/etc/init.d/rpcd restart 2>/dev/null || true
+
+# 6. Enable & Start Service
+echo "[6/6] Enabling and starting 9router service..."
 /etc/init.d/9router enable
 /etc/init.d/9router restart
 
+LAN_IP=$(uci get network.lan.ipaddr 2>/dev/null || echo '192.168.1.1')
 echo "=================================================="
 echo " [✓] 9router successfully installed on OpenWrt!"
 echo ""
-echo " Dashboard UI : http://$(uci get network.lan.ipaddr 2>/dev/null || echo '192.168.1.1'):20128"
-echo " API Key      : $(uci get 9router.config.api_key 2>/dev/null || echo 'dsh-local-key')"
-echo " Admin Pass   : $(uci get 9router.config.admin_password 2>/dev/null || echo 'admin123')"
+echo " 🌐 LuCI Menu     : Services -> 9router AI"
+echo " 🚀 Web Dashboard : http://$LAN_IP:20128"
+echo " 🔑 API Key       : $(uci get 9router.config.api_key 2>/dev/null || echo 'dsh-local-key')"
+echo " 🔒 Admin Pass    : $(uci get 9router.config.admin_password 2>/dev/null || echo 'admin123')"
 echo ""
-echo " To manage:"
+echo " To manage via terminal:"
 echo "   /etc/init.d/9router status"
 echo "   /etc/init.d/9router restart"
-echo "   /etc/init.d/9router stop"
 echo "   Config: /etc/config/9router"
 echo "=================================================="
