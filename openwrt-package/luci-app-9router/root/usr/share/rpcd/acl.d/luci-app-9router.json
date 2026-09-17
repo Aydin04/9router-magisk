@@ -3,6 +3,9 @@
 		"description": "Grant access to 9router AI Gateway",
 		"read": {
 			"uci": [ "9router" ],
+			"ubus": {
+				"log": [ "read" ]
+			},
 			"file": {
 				"/var/log/9router.log": [ "read" ],
 				"/etc/9router-data/service.log": [ "read" ]
