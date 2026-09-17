@@ -142,9 +142,13 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.40
-          name: "9router Magisk Module v0.5.40 (Fix Combos & Model Capabilities)"
+          tag_name: v0.5.41
+          name: "9router Magisk Module v0.5.41 (Fix Combos Minified React Error #31)"
           body: |
+            ## 9router Magisk Module v0.5.41
+            - **Fix React Crash on Combos Page**: Resolved Minified React Error #31 (`Objects are not valid as a React child`) caused by object-structured models `{id, kind, model, providerId, connectionId, weight, label}` in `combos` database.
+            - **Robust Model String Normalization**: Added helper `getModelStr()` and sanitized combo models in both `combosRepo.js` (backend) and `dashboard/combos/page.js` (frontend `ComboCard`, `ModelItem`, `CapacityAdapterCap`).
+            - **Built-in Free Combos Support**: Pre-populated free combos (`auto/best-free`, `best-free`, `auto/coding:free`, `coding-free`, `auto/fast:free`, `fast-free`).
             ## 9router Magisk Module v0.5.39 (Cleaned & Optimized)
             - **🧹 Aggressive Build Junk Purge**:
               - Removed duplicate nested `.next/standalone` folder (~68MB saved).

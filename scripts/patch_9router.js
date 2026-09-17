@@ -859,6 +859,38 @@ export const DEFAULT_FREE_COMBOS = [
       }
 
       cSrc = cSrc.replace(
+        `function rowToCombo(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    models: parseJson(row.models, []),
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}`,
+        `function rowToCombo(row) {
+  if (!row) return null;
+  const rawModels = parseJson(row.models, []);
+  const models = (Array.isArray(rawModels) ? rawModels : []).map(m => {
+    if (!m) return "";
+    if (typeof m === "string") return m;
+    if (typeof m === "object") return m.label || m.model || m.id || m.value || JSON.stringify(m);
+    return String(m);
+  }).filter(Boolean);
+  return {
+    id: row.id,
+    name: row.name,
+    kind: row.kind,
+    models,
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt,
+  };
+}`
+      );
+
+      cSrc = cSrc.replace(
         `export async function getCombos() {
   const db = await getAdapter();
   const rows = db.all(\`SELECT * FROM combos ORDER BY createdAt ASC\`);
@@ -905,7 +937,7 @@ export const DEFAULT_FREE_COMBOS = [
       );
 
       fs.writeFileSync(combosRepoPath, cSrc, "utf8");
-      console.log(`[Patch] Injected DEFAULT_FREE_COMBOS into combosRepo.js!`);
+      console.log(`[Patch] Injected DEFAULT_FREE_COMBOS and sanitized rowToCombo in combosRepo.js!`);
     }
   }
 
@@ -981,14 +1013,32 @@ export const DEFAULT_FREE_COMBOS = [
       );
     }
 
-    // Harden fetchData against null/undefined combos and ensure models is an array
+    // Helper: normalize model entry to string
+    const getModelStrHelper = `
+function getModelStr(m) {
+  if (!m) return "";
+  if (typeof m === "string") return m;
+  if (typeof m === "object") return m.label || m.model || m.id || m.value || JSON.stringify(m);
+  return String(m);
+}
+`;
+    if (!pageSrc.includes("function getModelStr(")) {
+      const topImportNeedle = 'import { isOpenAICompatibleProvider, isAnthropicCompatibleProvider } from "@/shared/constants/providers";';
+      if (pageSrc.includes(topImportNeedle)) {
+        pageSrc = pageSrc.replace(topImportNeedle, topImportNeedle + "\n" + getModelStrHelper);
+      } else {
+        pageSrc = getModelStrHelper + pageSrc;
+      }
+    }
+
+    // Harden fetchData against null/undefined combos and normalize model items
     const oldFilterCombos = `if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));`;
-    const newFilterCombos = `if (combosRes.ok) setCombos((combosData.combos || []).filter(c => c && (!c.kind || c.kind === "llm")).map(c => ({ ...c, models: Array.isArray(c.models) ? c.models : [] })));`;
+    const newFilterCombos = `if (combosRes.ok) setCombos((combosData.combos || []).filter(c => c && (!c.kind || c.kind === "llm")).map(c => ({ ...c, models: (Array.isArray(c.models) ? c.models : []).map(m => getModelStr(m)).filter(Boolean) })));`;
     if (pageSrc.includes(oldFilterCombos)) {
       pageSrc = pageSrc.replace(oldFilterCombos, newFilterCombos);
     }
 
-    // Harden ComboCard safe models slicing & length checks
+    // Harden ComboCard safe models slicing & length checks & render model string
     pageSrc = pageSrc.replace(
       /combo\.models\.length === 0/g,
       "(!combo.models || combo.models.length === 0)"
@@ -1003,13 +1053,47 @@ export const DEFAULT_FREE_COMBOS = [
     );
     pageSrc = pageSrc.replace(
       /\`Auto — \$\{combo\.models\[0\] \|\| "first model"\}\`/g,
-      '`Auto — ${(combo.models && combo.models[0]) || "first model"}`'
+      '`Auto — ${getModelStr(combo.models && combo.models[0]) || "first model"}`'
+    );
+    pageSrc = pageSrc.replace(
+      /\`Auto — \$\{\(combo\.models && combo\.models\[0\]\) \|\| "first model"\}\`/g,
+      '`Auto — ${getModelStr(combo.models && combo.models[0]) || "first model"}`'
+    );
+
+    // Replace <span>{model}</span> in ComboCard
+    pageSrc = pageSrc.replace(
+      `                  <code key={index} className="inline-flex items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5">
+                    <span>{model}</span>
+                    <CapacityBadges caps={getCaps?.(model)} />
+                  </code>`,
+      `                  <code key={index} className="inline-flex items-center gap-1 rounded bg-black/5 px-1.5 py-0.5 font-mono text-xs text-text-muted dark:bg-white/5">
+                    <span>{getModelStr(model)}</span>
+                    <CapacityBadges caps={getCaps?.(getModelStr(model))} />
+                  </code>`
+    );
+
+    // Safeguard ModelItem: ensure draft string and display string
+    pageSrc = pageSrc.replace(
+      `  const [draft, setDraft] = useState(model);`,
+      `  const [draft, setDraft] = useState(getModelStr(model));`
+    );
+    pageSrc = pageSrc.replace(
+      `          onClick={() => setEditing(true)}
+          title="Click to edit"
+        >
+          {model}
+        </div>`,
+      `          onClick={() => setEditing(true)}
+          title="Click to edit"
+        >
+          {getModelStr(model)}
+        </div>`
     );
 
     // Safeguard CapacityAdapterCap model normalization: ensure model string when mapped
     const oldCapModelMap = `models.slice(0, 3).map((model, index) => (`;
     const newCapModelMap = `models.slice(0, 3).map((mItem, index) => {
-                  const model = typeof mItem === "string" ? mItem : (mItem?.model || mItem?.value || String(mItem || ""));
+                  const model = getModelStr(mItem);
                   return (`;
     if (pageSrc.includes(oldCapModelMap)) {
       pageSrc = pageSrc.replace(oldCapModelMap, newCapModelMap);
