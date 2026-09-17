@@ -142,9 +142,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.42
-          name: "9router Magisk Module v0.5.42 (Backup Fix, Android Cloudflare Fix, Auto-Merge Providers)"
+          tag_name: v0.5.43
+          name: "9router Magisk Module v0.5.43 (Fix Providers Page ReferenceError)"
           body: |
+            ## 9router Magisk Module v0.5.43
+            - **Fix Providers Page Crash**: Resolved `ReferenceError: can't access lexical declaration 'connections' before initialization` on `/dashboard/providers` caused by TDZ (Temporal Dead Zone) hook placement.
             ## 9router Magisk Module v0.5.42
             - **Database Backup Password Fix**: Resolved "Invalid password" issue when exporting database. Profile page now downloads backup directly in 1 click without failing password prompts. Backend authentication fallback accepts master defaults or active dashboard sessions.
             - **Cloudflare Tunnel Android Watchdog Fix**: Added `android` platform mappings (`arm64`, `x64`, `arm`) to `PLATFORM_MAPPINGS` in `cloudflared.js`, stopping the infinite restart loop and high CPU/log spam on Android.

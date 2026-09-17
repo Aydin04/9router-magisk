@@ -1715,7 +1715,7 @@ export async function POST(request) {
   // 18. Inject "Auto-Merge Custom Providers" banner & button in dashboard/providers/page.js
   if (fs.existsSync(providersPagePath)) {
     let pSrc = fs.readFileSync(providersPagePath, "utf8");
-    if (!pSrc.includes("handleAutoMergeCustomProviders")) {
+    if (!pSrc.includes("handleExecuteMerge")) {
       const mergeHookCode = `
   const [mergeLoading, setMergeLoading] = useState(false);
   const [mergeCandidates, setMergeCandidates] = useState([]);
@@ -1757,8 +1757,13 @@ export async function POST(request) {
     }
   };
 `;
-      pSrc = pSrc.replace("const ProvidersPage = () => {", "const ProvidersPage = () => {\n" + mergeHookCode);
-      pSrc = pSrc.replace("export default function ProvidersPage() {", "export default function ProvidersPage() {\n" + mergeHookCode);
+      const fetchDataAnchor = `    fetchData();
+  }, []);`;
+      if (pSrc.includes(fetchDataAnchor)) {
+        pSrc = pSrc.replace(fetchDataAnchor, fetchDataAnchor + "\n" + mergeHookCode);
+      } else {
+        pSrc = pSrc.replace("const [providerNodes, setProviderNodes] = useState([]);", "const [providerNodes, setProviderNodes] = useState([]);\n" + mergeHookCode);
+      }
 
       const customSectionAnchor = `      {/* Custom Providers (OpenAI/Anthropic Compatible) — dynamic */}`;
       const mergeBannerUi = `      {/* Auto-Merge Banner for Migrating Custom Providers to Official Ported Providers */}
