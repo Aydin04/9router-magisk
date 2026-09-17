@@ -142,9 +142,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.44
-          name: "9router Magisk Module v0.5.44 (Universal API Key Tester for Ported Providers)"
+          tag_name: v0.5.45
+          name: "9router Magisk Module v0.5.45 (Live Dynamic Models Fetcher for 385+ Providers)"
           body: |
+            ## 9router Magisk Module v0.5.45
+            - **Live Dynamic Model Fetching for All 385+ Ported Providers**: Upgraded the "Fetch Models from API" button and backend `/api/providers/[id]/models` route. It now queries live upstream `/models` endpoints directly using the user's API key with universal OpenAI/Anthropic headers, registry `validateUrl`/`baseUrl` fallbacks, and multi-connection discovery, completely eliminating unnecessary static fallbacks.
             ## 9router Magisk Module v0.5.44
             - **Universal API Key Testing Support for 385+ Ported Providers**: Upstream 9router only had hardcoded `switch-case` testing logic for ~30 legacy providers; testing any ported provider previously returned "Provider test not supported" or false invalid errors. Added universal `/models` and minimal chat probe testing fallback using registry endpoints (`validateUrl` / `baseUrl`).
             ## 9router Magisk Module v0.5.43

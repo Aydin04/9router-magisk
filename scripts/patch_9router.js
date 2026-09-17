@@ -126,9 +126,10 @@ function patch(targetDir) {
   if (fs.existsSync(modelsRoutePath)) {
     let routeSrc = fs.readFileSync(modelsRoutePath, "utf8");
 
-    // 5a. Top-level import: Add PROVIDERS, REGISTRY, and FILTERS
-    const oldImport = `import { resolveOllamaLocalHost } from "open-sse/config/providers.js";`;
-    const newImport = `import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";
+    // 5a. Top-level import: Add PROVIDERS, REGISTRY, FILTERS, and getProviderConnections
+    const oldImport = `import { getProviderConnectionById } from "@/models";`;
+    const newImport = `import { getProviderConnectionById, getProviderConnections } from "@/models";
+import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";
 import REGISTRY from "open-sse/providers/registry/index.js";
 import { FILTERS } from "../../suggested-models/filters.js";`;
     if (routeSrc.includes(oldImport)) {
@@ -143,6 +144,17 @@ import { FILTERS } from "../../suggested-models/filters.js";`;
     }`;
 
     const newConnLookup = `    let connection = await getProviderConnectionById(id);
+    if (!connection) {
+      // If 'id' is a providerId, look up the active or latest connection for that provider
+      try {
+        const provConns = await getProviderConnections({ provider: id });
+        if (Array.isArray(provConns) && provConns.length > 0) {
+          connection = provConns.find(c => c.isActive !== false && (c.apiKey || c.accessToken)) || provConns[0];
+        }
+      } catch (findErr) {
+        // ignore
+      }
+    }
     let reg = (typeof REGISTRY !== "undefined" && Array.isArray(REGISTRY))
       ? REGISTRY.find(r => r.id === id || r.alias === id)
       : null;
@@ -230,22 +242,49 @@ import { FILTERS } from "../../suggested-models/filters.js";`;
 
     const newUniversalFallback = `    let config = PROVIDER_MODELS_CONFIG[connection.provider];
     if (!config) {
-      // Universal OpenAI-compatible auto-discovery for any provider
+      // Universal dynamic auto-discovery for all 385+ ported providers
       const token = connection.providerSpecificData?.copilotToken || connection.accessToken || connection.apiKey;
-      let targetBase = connection.providerSpecificData?.baseUrl || "";
+      const regConfig = PROVIDERS[connection.provider];
+      let targetBase = connection.providerSpecificData?.baseUrl || regConfig?.baseUrl || regConfig?.validateUrl || "";
       if (!targetBase && reg) {
-        targetBase = reg.baseUrl || (reg.transport && reg.transport.baseUrl) || "";
+        targetBase = reg.baseUrl || (reg.transport && reg.transport.baseUrl) || (reg.transport && reg.transport.validateUrl) || "";
       }
       
       if (token && targetBase && /^https?:\\/\\//i.test(targetBase)) {
-        let modelsUrl = targetBase.replace(/\\/+$/, "");
-        modelsUrl = modelsUrl.replace(/\\/(chat\\/completions|responses|chat|messages)$/i, "");
-        if (!modelsUrl.endsWith("/models")) {
-          modelsUrl = \`\${modelsUrl}/models\`;
+        let modelsUrl = regConfig?.validateUrl || targetBase;
+        if (modelsUrl.includes("/chat/completions")) {
+          modelsUrl = modelsUrl.replace(/\\/chat\\/completions$/, "/models");
+        } else if (modelsUrl.includes("/messages")) {
+          modelsUrl = modelsUrl.replace(/\\/messages$/, "/models");
+        } else if (!modelsUrl.endsWith("/models") && !modelsUrl.includes("?")) {
+          modelsUrl = modelsUrl.replace(/\\/+$/, "") + "/models";
         }
-        config = createOpenAIModelsConfig(modelsUrl);
+
+        const isAnthropic = regConfig?.format === "anthropic" || connection.provider.startsWith("anthropic-");
+        const universalHeaders = isAnthropic
+          ? {
+              "Content-Type": "application/json",
+              "x-api-key": token,
+              "anthropic-version": "2023-06-01",
+              "Authorization": \`Bearer \${token}\`,
+            }
+          : {
+              "Content-Type": "application/json",
+              "Authorization": \`Bearer \${token}\`,
+            };
+
+        if (regConfig?.headers) {
+          Object.assign(universalHeaders, regConfig.headers);
+        }
+
+        config = {
+          url: modelsUrl,
+          method: "GET",
+          headers: universalHeaders,
+          parseResponse: parseOpenAIStyleModels,
+        };
       } else {
-        // Fallback to static catalog if no URL can be probed
+        // Fallback to static catalog if no upstream URL could be resolved
         const staticList = (reg?.models && reg.models.length > 0)
           ? reg.models
           : getStaticProviderModels(connection.provider);
@@ -350,10 +389,12 @@ import { FILTERS } from "../../suggested-models/filters.js";`;
     // 6a. Inject Universal Fetch Models button (supports active connection OR No-Auth)
     const qoderBtnAnchor = `{/* Import Qoder models button — only show for qoder provider */}`;
     const universalImportBtn = `{/* Universal Fetch Models from API button for any active connection or no-auth provider */}
-        {(connections.some((conn) => conn.isActive !== false) || isFreeNoAuth) && (
+        {(connections.length > 0 || isFreeNoAuth) && (
           <button
             onClick={async () => {
-              const activeConn = connections.find((c) => c.isActive !== false);
+              const activeConn = connections.find((c) => c.isActive !== false && (c.apiKey || c.accessToken))
+                || connections.find((c) => c.apiKey || c.accessToken)
+                || connections[0];
               const targetEndpoint = activeConn ? \`/api/providers/\${activeConn.id}/models\` : \`/api/providers/\${providerId}/models\`;
               try {
                 const res = await fetch(targetEndpoint);
