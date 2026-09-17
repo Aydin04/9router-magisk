@@ -142,13 +142,22 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.45
-          name: "9router Magisk Module v0.5.45 (Live Dynamic Models Fetcher for 385+ Providers)"
+          tag_name: v0.5.46
+          name: "9router Magisk Module v0.5.46 (Universal Provider Validation & Dynamic Models for 385+ Ported Providers)"
           body: |
+            ## 9router Magisk Module v0.5.46
+            - **Universal API Key Validation for Ported Providers (`/api/providers/validate`)**:
+              - Fixed `failed: Provider test not supported` when entering or checking API keys in modal dialogs.
+              - Upstream validate route only supported OpenAI format with strict `cfg.format === "openai"`, causing ported providers (and Anthropic-format providers) to immediately error.
+              - Injected universal probe logic into `/api/providers/validate` supporting all 385+ providers with OpenAI and Anthropic headers, fallback to registry endpoints (`validateUrl` / `baseUrl`), and 1-token probe.
+            - **Enhanced Transport & Endpoints in Extracted Providers**:
+              - Updated `extracted_providers.json` and registry generator so all 347 ported providers include valid `transport` configs (`baseUrl`, `validateUrl`, `format`) and pre-bundled models from upstream router.
+            - **Dynamic Live Model Discovery**:
+              - Ensured `/api/providers/[id]/models` resolves live upstream `/models` across all ported providers without falling back to static catalog.
             ## 9router Magisk Module v0.5.45
-            - **Live Dynamic Model Fetching for All 385+ Ported Providers**: Upgraded the "Fetch Models from API" button and backend `/api/providers/[id]/models` route. It now queries live upstream `/models` endpoints directly using the user's API key with universal OpenAI/Anthropic headers, registry `validateUrl`/`baseUrl` fallbacks, and multi-connection discovery, completely eliminating unnecessary static fallbacks.
+            - **Live Dynamic Model Fetching for All 385+ Ported Providers**: Upgraded the "Fetch Models from API" button and backend `/api/providers/[id]/models` route.
             ## 9router Magisk Module v0.5.44
-            - **Universal API Key Testing Support for 385+ Ported Providers**: Upstream 9router only had hardcoded `switch-case` testing logic for ~30 legacy providers; testing any ported provider previously returned "Provider test not supported" or false invalid errors. Added universal `/models` and minimal chat probe testing fallback using registry endpoints (`validateUrl` / `baseUrl`).
+            - **Universal API Key Testing Support for 385+ Ported Providers**: Added universal `/models` and minimal chat probe testing fallback using registry endpoints (`validateUrl` / `baseUrl`).
             ## 9router Magisk Module v0.5.43
             - **Fix Providers Page Crash**: Resolved `ReferenceError: can't access lexical declaration 'connections' before initialization` on `/dashboard/providers` caused by TDZ (Temporal Dead Zone) hook placement.
             ## 9router Magisk Module v0.5.42

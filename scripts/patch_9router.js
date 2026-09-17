@@ -71,6 +71,12 @@ function patch(targetDir) {
 
       const filePath = path.join(registryDir, `${id}.js`);
       const cat = prov.category === "llm" || !prov.category ? (prov.hasFree ? "freeTier" : "apikey") : prov.category;
+      const transport = {
+        baseUrl: prov.baseUrl || "",
+        format: prov.format || "openai",
+        ...(prov.validateUrl ? { validateUrl: prov.validateUrl } : {}),
+      };
+      const models = Array.isArray(prov.models) && prov.models.length > 0 ? prov.models : [];
       const fileContent = `export default {
   id: ${JSON.stringify(prov.id)},
   alias: ${JSON.stringify(prov.alias || prov.id)},
@@ -83,14 +89,16 @@ function patch(targetDir) {
     website: ${JSON.stringify(prov.website || "")}
   },
   baseUrl: ${JSON.stringify(prov.baseUrl || "")},
-  apiType: ${JSON.stringify(prov.apiType || "openai")},
+  apiType: ${JSON.stringify(prov.apiType || prov.format || "openai")},
   category: ${JSON.stringify(cat)},
   authModes: ${JSON.stringify(prov.authModes || ["apikey"])},
   hasFree: ${JSON.stringify(prov.hasFree || false)},
   freeTier: ${JSON.stringify(prov.freeTier || false)},
   pricing: ${JSON.stringify(prov.pricing || null)},
   disabled: false,
-  description: ${JSON.stringify(prov.description || "")}
+  description: ${JSON.stringify(prov.description || "")},
+  transport: ${JSON.stringify(transport, null, 2)},
+  models: ${JSON.stringify(models, null, 2)}
 };
 `;
       fs.writeFileSync(filePath, fileContent, "utf8");
@@ -247,11 +255,11 @@ import { getProviderConnections } from "@/models";`;
       const regConfig = PROVIDERS[connection.provider];
       let targetBase = connection.providerSpecificData?.baseUrl || regConfig?.baseUrl || regConfig?.validateUrl || "";
       if (!targetBase && reg) {
-        targetBase = reg.baseUrl || (reg.transport && reg.transport.baseUrl) || (reg.transport && reg.transport.validateUrl) || "";
+        targetBase = reg.baseUrl || (reg.transport && (reg.transport.baseUrl || reg.transport.validateUrl)) || "";
       }
       
       if (token && targetBase && /^https?:\\/\\//i.test(targetBase)) {
-        let modelsUrl = regConfig?.validateUrl || targetBase;
+        let modelsUrl = regConfig?.validateUrl || (reg?.transport && reg.transport.validateUrl) || targetBase;
         if (modelsUrl.includes("/chat/completions")) {
           modelsUrl = modelsUrl.replace(/\\/chat\\/completions$/, "/models");
         } else if (modelsUrl.includes("/messages")) {
@@ -260,7 +268,7 @@ import { getProviderConnections } from "@/models";`;
           modelsUrl = modelsUrl.replace(/\\/+$/, "") + "/models";
         }
 
-        const isAnthropic = regConfig?.format === "anthropic" || connection.provider.startsWith("anthropic-");
+        const isAnthropic = regConfig?.format === "anthropic" || (reg?.transport && reg.transport.format === "anthropic") || connection.provider.startsWith("anthropic-");
         const universalHeaders = isAnthropic
           ? {
               "Content-Type": "application/json",
@@ -1855,18 +1863,32 @@ export async function POST(request) {
   const testUtilsPath = path.join(targetDir, "src/app/api/providers/[id]/test/testUtils.js");
   if (fs.existsSync(testUtilsPath)) {
     let tSrc = fs.readFileSync(testUtilsPath, "utf8");
-    const oldDefaultCase = `      default:
+    if (!tSrc.includes('import REGISTRY from "open-sse/providers/registry/index.js";')) {
+      tSrc = tSrc.replace(
+        `import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";`,
+        `import { resolveOllamaLocalHost, PROVIDERS } from "open-sse/config/providers.js";\nimport REGISTRY from "open-sse/providers/registry/index.js";`
+      );
+    }
+    const oldDefaultCase1 = `      default:
         return { valid: false, error: "Provider test not supported" };`;
+
+    const oldDefaultCase2 = `      default: {
+        // Universal tester for all 385+ ported providers
+        const regConfig = PROVIDERS[connection.provider];
+        const rawBase = connection.providerSpecificData?.baseUrl || regConfig?.baseUrl || regConfig?.validateUrl;`;
 
     const newDefaultCase = `      default: {
         // Universal tester for all 385+ ported providers
         const regConfig = PROVIDERS[connection.provider];
-        const rawBase = connection.providerSpecificData?.baseUrl || regConfig?.baseUrl || regConfig?.validateUrl;
+        const reg = (typeof REGISTRY !== "undefined" && Array.isArray(REGISTRY))
+          ? REGISTRY.find(r => r.id === connection.provider || r.alias === connection.provider)
+          : null;
+        const rawBase = connection.providerSpecificData?.baseUrl || regConfig?.baseUrl || regConfig?.validateUrl || reg?.baseUrl || (reg?.transport && (reg.transport.baseUrl || reg.transport.validateUrl));
         if (!rawBase) {
           return { valid: false, error: "Provider test not supported" };
         }
 
-        let testUrl = regConfig?.validateUrl || rawBase;
+        let testUrl = regConfig?.validateUrl || (reg?.transport && reg.transport.validateUrl) || rawBase;
         if (testUrl.includes("/chat/completions")) {
           testUrl = testUrl.replace(/\\/chat\\/completions$/, "/models");
         } else if (testUrl.includes("/messages")) {
@@ -1875,7 +1897,7 @@ export async function POST(request) {
           testUrl = testUrl.replace(/\\/+$/, "") + "/models";
         }
 
-        const isAnthropic = regConfig?.format === "anthropic" || connection.provider.startsWith("anthropic-");
+        const isAnthropic = regConfig?.format === "anthropic" || (reg?.transport && reg.transport.format === "anthropic") || connection.provider.startsWith("anthropic-");
         const headers = isAnthropic
           ? {
               "x-api-key": connection.apiKey,
@@ -1935,10 +1957,146 @@ export async function POST(request) {
         return { valid: false, error: \`API returned \${probeRes.status}\` };
       }`;
 
-    if (tSrc.includes(oldDefaultCase)) {
-      tSrc = tSrc.replace(oldDefaultCase, newDefaultCase);
+    if (tSrc.includes(oldDefaultCase1)) {
+      tSrc = tSrc.replace(oldDefaultCase1, newDefaultCase);
       fs.writeFileSync(testUtilsPath, tSrc, "utf8");
       console.log(`[Patch] Injected Universal API Key tester into testUtils.js!`);
+    } else if (tSrc.includes(oldDefaultCase2)) {
+      // Replace existing universal default case with enhanced version
+      const startIdx = tSrc.indexOf("      default: {");
+      const endMarker = "        return { valid: false, error: `API returned ${probeRes.status}` };\n      }";
+      const endIdx = tSrc.indexOf(endMarker);
+      if (startIdx !== -1 && endIdx !== -1) {
+        tSrc = tSrc.slice(0, startIdx) + newDefaultCase + tSrc.slice(endIdx + endMarker.length);
+        fs.writeFileSync(testUtilsPath, tSrc, "utf8");
+        console.log(`[Patch] Updated Universal API Key tester in testUtils.js with REGISTRY support!`);
+      }
+    }
+  }
+
+  // 20. Patch validate/route.js: Universal API Key validation when creating/saving connection
+  const validateRoutePath = path.join(targetDir, "src/app/api/providers/validate/route.js");
+  if (fs.existsSync(validateRoutePath)) {
+    let vSrc = fs.readFileSync(validateRoutePath, "utf8");
+    if (!vSrc.includes('import REGISTRY from "open-sse/providers/registry/index.js";')) {
+      vSrc = vSrc.replace(
+        `import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from "open-sse/config/providers.js";`,
+        `import { resolveOllamaLocalHost, resolveXiaomiTokenplanBaseUrl, PROVIDERS } from "open-sse/config/providers.js";\nimport REGISTRY from "open-sse/providers/registry/index.js";`
+      );
+    }
+
+    const oldValidateDefault = `        default: {
+          // Generic probe for OpenAI-compatible providers (config-driven from PROVIDERS)
+          const cfg = PROVIDERS[provider];
+          if (!cfg || cfg.format !== "openai" || !cfg.baseUrl) {
+            return NextResponse.json({ error: "Provider validation not supported" }, { status: 400 });
+          }
+          if (cfg.noAuth) {
+            isValid = true;
+            break;
+          }
+          // Build auth headers based on cfg.authHeader (default: bearer)
+          const headers = { "Content-Type": "application/json", ...(cfg.headers || {}) };
+          if (cfg.authHeader === "x-api-key") headers["X-API-Key"] = apiKey;
+          else headers["Authorization"] = \`Bearer \${apiKey}\`;
+          // Try /models first (fast GET), fallback to chat probe on ambiguous response
+          const modelsUrl = cfg.baseUrl.replace(/\\/chat\\/completions$/, "/models").replace(/\\/chatbot$/, "/models");
+          let probeOk = null;
+          try {
+            const probeRes = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(8000) });
+            if (probeRes.status === 401 || probeRes.status === 403) probeOk = false;
+            else if (probeRes.ok) probeOk = true;
+          } catch { /* fallback to chat */ }
+          if (probeOk !== null) {
+            isValid = probeOk;
+            break;
+          }
+          // Fallback: minimal chat probe
+          const defaultModel = getDefaultModel(provider) || "test";
+          const chatRes = await fetch(cfg.baseUrl, {
+            method: "POST",
+            headers,
+            body: JSON.stringify({ model: defaultModel, messages: [{ role: "user", content: "ping" }], max_tokens: 1 }),
+            signal: AbortSignal.timeout(10000),
+          });
+          isValid = chatRes.status !== 401 && chatRes.status !== 403;
+          break;
+        }`;
+
+    const newValidateDefault = `        default: {
+          // Universal probe for all 385+ ported providers
+          const cfg = PROVIDERS[provider];
+          const reg = (typeof REGISTRY !== "undefined" && Array.isArray(REGISTRY))
+            ? REGISTRY.find(r => r.id === provider || r.alias === provider)
+            : null;
+          const rawBase = providerSpecificData?.baseUrl || cfg?.baseUrl || cfg?.validateUrl || reg?.baseUrl || (reg?.transport && (reg.transport.baseUrl || reg.transport.validateUrl));
+          if (!rawBase) {
+            return NextResponse.json({ error: "Provider validation not supported" }, { status: 400 });
+          }
+          if (cfg?.noAuth || reg?.noAuth || apiKey === "no-auth") {
+            isValid = true;
+            break;
+          }
+
+          const isAnthropic = cfg?.format === "anthropic" || (reg?.transport && reg.transport.format === "anthropic") || provider.startsWith("anthropic-");
+          const headers = isAnthropic
+            ? {
+                "Content-Type": "application/json",
+                "x-api-key": apiKey,
+                "anthropic-version": "2023-06-01",
+                "Authorization": \`Bearer \${apiKey}\`,
+                ...(cfg?.headers || {}),
+              }
+            : {
+                "Content-Type": "application/json",
+                ...(cfg?.authHeader === "x-api-key" ? { "X-API-Key": apiKey } : { "Authorization": \`Bearer \${apiKey}\` }),
+                ...(cfg?.headers || {}),
+              };
+
+          let modelsUrl = cfg?.validateUrl || (reg?.transport && reg.transport.validateUrl) || rawBase;
+          if (modelsUrl.includes("/chat/completions")) {
+            modelsUrl = modelsUrl.replace(/\\/chat\\/completions$/, "/models");
+          } else if (modelsUrl.includes("/messages")) {
+            modelsUrl = modelsUrl.replace(/\\/messages$/, "/models");
+          } else if (!modelsUrl.endsWith("/models") && !modelsUrl.includes("?")) {
+            modelsUrl = modelsUrl.replace(/\\/+$/, "") + "/models";
+          }
+
+          let probeOk = null;
+          try {
+            const probeRes = await fetch(modelsUrl, { headers, signal: AbortSignal.timeout(8000) });
+            if (probeRes.status === 401 || probeRes.status === 403) probeOk = false;
+            else if (probeRes.ok) probeOk = true;
+          } catch { /* fallback to chat */ }
+
+          if (probeOk !== null) {
+            isValid = probeOk;
+            break;
+          }
+
+          // Fallback: minimal 1-token dummy chat probe
+          const chatUrl = rawBase.includes("/chat/completions") || rawBase.includes("/messages")
+            ? rawBase
+            : rawBase.replace(/\\/+$/, "") + (isAnthropic ? "/v1/messages" : "/v1/chat/completions");
+          const defaultModel = getDefaultModel(provider) || "gpt-3.5-turbo";
+          const chatBody = isAnthropic
+            ? JSON.stringify({ model: defaultModel, max_tokens: 1, messages: [{ role: "user", content: "ping" }] })
+            : JSON.stringify({ model: defaultModel, messages: [{ role: "user", content: "ping" }], max_tokens: 1 });
+
+          const chatRes = await fetch(chatUrl, {
+            method: "POST",
+            headers,
+            body: chatBody,
+            signal: AbortSignal.timeout(10000),
+          });
+          isValid = chatRes.status !== 401 && chatRes.status !== 403;
+          break;
+        }`;
+
+    if (vSrc.includes(oldValidateDefault)) {
+      vSrc = vSrc.replace(oldValidateDefault, newValidateDefault);
+      fs.writeFileSync(validateRoutePath, vSrc, "utf8");
+      console.log(`[Patch] Injected Universal Provider Validator into validate/route.js!`);
     }
   }
 }
