@@ -21,20 +21,23 @@ Ultra-Lite 9router AI Gateway background service for **Android (Magisk/KernelSU/
 
 ## 📦 Cara Install di OpenWrt
 
-### Syarat
-1. OpenWrt 21.02 / 22.03 / 23.05 atau yang lebih baru.
-2. Paket `node` (Node.js) terinstall:
-   ```sh
-   opkg update
-   opkg install node
-   ```
+### Kompatibilitas Firmware OpenWrt
+- **OpenWrt 25.x (Next-Gen)**: Menggunakan package manager `apk` (`apk update && apk add nodejs`).
+- **OpenWrt 21.x / 22.x / 23.x / 24.x**: Menggunakan package manager `opkg` (`opkg update && opkg install node`).
+- **Arsitektur CPU**: Mendukung semua arsitektur router (x86_64, aarch64, arm_cortex, mips, mipsel).
 
-### 1-Click Install
-Jalankan perintah berikut di terminal SSH OpenWrt Anda:
+### 1-Click Auto Install (Auto-Detect apk/opkg & Install LuCI App)
+Jalankan satu perintah ini di terminal SSH OpenWrt Anda:
 
 ```sh
 wget -qO- https://raw.githubusercontent.com/Aydin04/9router-magisk/main/openwrt-package/install.sh | sh
 ```
+Script instalasi akan otomatis:
+1. Mendeteksi apakah router menggunakan `apk` (OpenWrt 25+) atau `opkg`.
+2. Menjalankan update & upgrade package manager router.
+3. Memasang Node.js (`nodejs`/`node`).
+4. Mengunduh & mengekstrak bundle 9router core (385+ provider).
+5. Memasang **`luci-app-9router`** (Dashboard terintegrasi langsung di menu LuCI **Services -> 9router AI**).
 
 ### Konfigurasi UCI (`/etc/config/9router`)
 Konfigurasi dapat diubah sewaktu-waktu lewat file `/etc/config/9router` atau perintah `uci`:

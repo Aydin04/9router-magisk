@@ -10,18 +10,59 @@ echo "  385+ Ported Providers | Low RAM Ultra-Lite Core "
 echo "=================================================="
 
 # 1. Architecture & Dependency Check
-echo "[1/5] Checking dependencies..."
+echo "[1/5] Checking package manager & dependencies..."
+
+# Detect Package Manager (OpenWrt 25+ uses apk-tools, OpenWrt <=24 uses opkg)
+PKG_MGR=""
+if which apk >/dev/null 2>&1; then
+    PKG_MGR="apk"
+    echo "  -> Detected Package Manager: apk (OpenWrt 25.x / Next-Gen)"
+elif which opkg >/dev/null 2>&1; then
+    PKG_MGR="opkg"
+    echo "  -> Detected Package Manager: opkg (OpenWrt <= 24.x)"
+fi
+
 if ! which node >/dev/null 2>&1; then
-    echo "[!] Node.js not found. Attempting to install via opkg..."
-    opkg update || true
-    if ! opkg install node; then
-        echo "[ERROR] Failed to install node. Please install node manually: opkg install node"
-        exit 1
+    echo "[!] Node.js not found. Installing node via $PKG_MGR..."
+    if [ "$PKG_MGR" = "apk" ]; then
+        apk update || true
+        apk upgrade || true
+        if ! apk add nodejs; then
+            apk add node || true
+        fi
+    elif [ "$PKG_MGR" = "opkg" ]; then
+        opkg update || true
+        # Upgrade installed packages if possible
+        opkg upgrade node 2>/dev/null || true
+        if ! opkg install node; then
+            opkg install nodejs || true
+        fi
+    else
+        echo "[!] Neither apk nor opkg found. Checking system node..."
+    fi
+else
+    # Update package index and upgrade node to latest available if desired
+    if [ "$PKG_MGR" = "apk" ]; then
+        apk update || true
+        apk upgrade nodejs 2>/dev/null || apk upgrade node 2>/dev/null || true
+    elif [ "$PKG_MGR" = "opkg" ]; then
+        opkg update || true
+        opkg upgrade node 2>/dev/null || opkg upgrade nodejs 2>/dev/null || true
     fi
 fi
 
+if ! which node >/dev/null 2>&1; then
+    echo "[ERROR] Node.js could not be installed automatically!"
+    if [ "$PKG_MGR" = "apk" ]; then
+        echo "Please run manually: apk update && apk add nodejs"
+    else
+        echo "Please run manually: opkg update && opkg install node"
+    fi
+    exit 1
+fi
+
 NODE_VERSION=$(node -v 2>/dev/null || echo "unknown")
-echo "  -> Detected Node.js: $NODE_VERSION"
+echo "  -> Node.js ready: $NODE_VERSION"
 
 # 2. Setup Directories
 echo "[2/5] Creating directories..."
