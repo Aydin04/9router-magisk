@@ -715,7 +715,319 @@ function checkIsModelFree(pId, mId, isFreeFlag) {
     }
   }
 
-  // (Combos sections 8, 9, 10 removed: keeping upstream pure 9router combos implementation)
+  // 8. Harden useModelCaps.js (Fix: Uncaught TypeError: a.includes is not a function)
+  const useModelCapsPath = path.join(targetDir, "src/shared/hooks/useModelCaps.js");
+  if (fs.existsSync(useModelCapsPath)) {
+    let capsSrc = fs.readFileSync(useModelCapsPath, "utf8");
+    const oldResolveCaps = `function resolveCaps(byFull, byId, key) {
+  if (!key) return null;
+  if (byFull[key]) return byFull[key];
+  const bare = key.includes("/") ? key.slice(key.indexOf("/") + 1) : key;
+  if (byId[bare]) return byId[bare];
+  const provider = key.includes("/") ? key.slice(0, key.indexOf("/")) : null;`;
+
+    const newResolveCaps = `function resolveCaps(byFull, byId, rawKey) {
+  if (!rawKey) return null;
+  const key = typeof rawKey === "string" ? rawKey : (rawKey?.value || rawKey?.id || rawKey?.model || String(rawKey || ""));
+  if (!key || typeof key !== "string" || !key.trim()) return null;
+  if (byFull[key]) return byFull[key];
+  const bare = key.includes("/") ? key.slice(key.indexOf("/") + 1) : key;
+  if (byId[bare]) return byId[bare];
+  const provider = key.includes("/") ? key.slice(0, key.indexOf("/")) : null;`;
+
+    if (capsSrc.includes(oldResolveCaps)) {
+      capsSrc = capsSrc.replace(oldResolveCaps, newResolveCaps);
+      fs.writeFileSync(useModelCapsPath, capsSrc, "utf8");
+      console.log(`[Patch] Hardened useModelCaps.js against non-string keys!`);
+    }
+  }
+
+  // 9. Built-in Free Combos (auto/best-free, best-free, auto/coding:free, coding-free, etc.)
+  const combosRepoPath = path.join(targetDir, "src/lib/db/repos/combosRepo.js");
+  if (fs.existsSync(combosRepoPath)) {
+    let cSrc = fs.readFileSync(combosRepoPath, "utf8");
+    if (!cSrc.includes("DEFAULT_FREE_COMBOS")) {
+      const defaultCombosCode = `
+export const DEFAULT_FREE_COMBOS = [
+  {
+    id: "builtin-auto-best-free",
+    name: "auto/best-free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/minimax-m2.5-free",
+      "opencode/nemotron-3-super-free",
+      "opencode/qwen3.6-plus-free",
+      "oc/deepseek-v4-flash-free",
+      "oc/minimax-m2.5-free",
+      "oc/nemotron-3-super-free",
+      "oc/qwen3.6-plus-free"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-best-free",
+    name: "best-free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/minimax-m2.5-free",
+      "opencode/nemotron-3-super-free",
+      "opencode/qwen3.6-plus-free",
+      "oc/deepseek-v4-flash-free",
+      "oc/minimax-m2.5-free",
+      "oc/nemotron-3-super-free",
+      "oc/qwen3.6-plus-free"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-auto-coding-free",
+    name: "auto/coding:free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/qwen3.6-plus-free",
+      "opencode/ling-2.6-1t-free",
+      "oc/deepseek-v4-flash-free",
+      "oc/qwen3.6-plus-free",
+      "oc/ling-2.6-1t-free"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-coding-free",
+    name: "coding-free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/qwen3.6-plus-free",
+      "opencode/ling-2.6-1t-free",
+      "oc/deepseek-v4-flash-free",
+      "oc/qwen3.6-plus-free",
+      "oc/ling-2.6-1t-free"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-auto-fast-free",
+    name: "auto/fast:free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/mimo-v2.5-free",
+      "opencode/big-pickle",
+      "oc/deepseek-v4-flash-free",
+      "oc/mimo-v2.5-free",
+      "oc/big-pickle"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  },
+  {
+    id: "builtin-fast-free",
+    name: "fast-free",
+    kind: "llm",
+    models: [
+      "opencode/deepseek-v4-flash-free",
+      "opencode/mimo-v2.5-free",
+      "opencode/big-pickle",
+      "oc/deepseek-v4-flash-free",
+      "oc/mimo-v2.5-free",
+      "oc/big-pickle"
+    ],
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+    isBuiltin: true,
+  }
+];
+`;
+      const importNeedle = 'import { parseJson, stringifyJson } from "../helpers/jsonCol.js";';
+      if (cSrc.includes(importNeedle)) {
+        cSrc = cSrc.replace(importNeedle, importNeedle + "\n" + defaultCombosCode);
+      } else {
+        cSrc = defaultCombosCode + cSrc;
+      }
+
+      cSrc = cSrc.replace(
+        `export async function getCombos() {
+  const db = await getAdapter();
+  const rows = db.all(\`SELECT * FROM combos ORDER BY createdAt ASC\`);
+  return rows.map(rowToCombo);
+}`,
+        `export async function getCombos() {
+  const db = await getAdapter();
+  const rows = db.all(\`SELECT * FROM combos ORDER BY createdAt ASC\`);
+  const userCombos = (rows || []).map(rowToCombo).filter(Boolean);
+  const userNames = new Set(userCombos.map(c => c.name));
+  const builtins = DEFAULT_FREE_COMBOS.filter(c => !userNames.has(c.name));
+  return [...builtins, ...userCombos];
+}`
+      );
+
+      cSrc = cSrc.replace(
+        `export async function getComboById(id) {
+  const db = await getAdapter();
+  const row = db.get(\`SELECT * FROM combos WHERE id = ?\`, [id]);
+  return rowToCombo(row);
+}`,
+        `export async function getComboById(id) {
+  const db = await getAdapter();
+  const row = db.get(\`SELECT * FROM combos WHERE id = ?\`, [id]);
+  if (row) return rowToCombo(row);
+  const builtin = DEFAULT_FREE_COMBOS.find(c => c.id === id);
+  return builtin || null;
+}`
+      );
+
+      cSrc = cSrc.replace(
+        `export async function getComboByName(name) {
+  const db = await getAdapter();
+  const row = db.get(\`SELECT * FROM combos WHERE name = ?\`, [name]);
+  return rowToCombo(row);
+}`,
+        `export async function getComboByName(name) {
+  const db = await getAdapter();
+  const row = db.get(\`SELECT * FROM combos WHERE name = ?\`, [name]);
+  if (row) return rowToCombo(row);
+  const builtin = DEFAULT_FREE_COMBOS.find(c => c.name === name);
+  return builtin || null;
+}`
+      );
+
+      fs.writeFileSync(combosRepoPath, cSrc, "utf8");
+      console.log(`[Patch] Injected DEFAULT_FREE_COMBOS into combosRepo.js!`);
+    }
+  }
+
+  // 10. Patch src/sse/services/model.js to allow combo names with slashes (auto/*)
+  const sseModelPath = path.join(targetDir, "src/sse/services/model.js");
+  if (fs.existsSync(sseModelPath)) {
+    let mSrc = fs.readFileSync(sseModelPath, "utf8");
+    const oldGetComboModels = `export async function getComboModels(modelStr) {
+  // Only check if it's not in provider/model format
+  if (modelStr.includes("/")) return null;
+
+  const combo = await getComboByName(modelStr);
+  if (combo && combo.models && combo.models.length > 0) {
+    return combo.models;
+  }
+  return null;
+}`;
+
+    const newGetComboModels = `export async function getComboModels(modelStr) {
+  // Check exact combo match first (allows auto/* and virtual free combos)
+  const directCombo = await getComboByName(modelStr);
+  if (directCombo && directCombo.models && directCombo.models.length > 0) {
+    return directCombo.models;
+  }
+
+  // If it is in standard provider/model format, it is not a plain combo name
+  if (modelStr.includes("/")) return null;
+
+  return null;
+}`;
+
+    if (mSrc.includes(oldGetComboModels)) {
+      mSrc = mSrc.replace(oldGetComboModels, newGetComboModels);
+      fs.writeFileSync(sseModelPath, mSrc, "utf8");
+      console.log(`[Patch] Updated getComboModels in src/sse/services/model.js to support slash combos!`);
+    }
+  }
+
+  // 11. Patch combos regex validation to allow slash (/) and colon (:) for auto/coding:free
+  const comboApiRoutePath = path.join(targetDir, "src/app/api/combos/route.js");
+  if (fs.existsSync(comboApiRoutePath)) {
+    let apiSrc = fs.readFileSync(comboApiRoutePath, "utf8");
+    if (apiSrc.includes("const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;")) {
+      apiSrc = apiSrc.replace(
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;",
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.:/\\-]+$/;"
+      );
+      fs.writeFileSync(comboApiRoutePath, apiSrc, "utf8");
+      console.log(`[Patch] Updated VALID_NAME_REGEX in api/combos/route.js`);
+    }
+  }
+
+  const comboApiIdRoutePath = path.join(targetDir, "src/app/api/combos/[id]/route.js");
+  if (fs.existsSync(comboApiIdRoutePath)) {
+    let apiIdSrc = fs.readFileSync(comboApiIdRoutePath, "utf8");
+    if (apiIdSrc.includes("const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;")) {
+      apiIdSrc = apiIdSrc.replace(
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;",
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.:/\\-]+$/;"
+      );
+      fs.writeFileSync(comboApiIdRoutePath, apiIdSrc, "utf8");
+      console.log(`[Patch] Updated VALID_NAME_REGEX in api/combos/[id]/route.js`);
+    }
+  }
+
+  const comboPagePath = path.join(targetDir, "src/app/(dashboard)/dashboard/combos/page.js");
+  if (fs.existsSync(comboPagePath)) {
+    let pageSrc = fs.readFileSync(comboPagePath, "utf8");
+    if (pageSrc.includes("const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;")) {
+      pageSrc = pageSrc.replace(
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.\\-]+$/;",
+        "const VALID_NAME_REGEX = /^[a-zA-Z0-9_.:/\\-]+$/;"
+      );
+    }
+
+    // Harden fetchData against null/undefined combos and ensure models is an array
+    const oldFilterCombos = `if (combosRes.ok) setCombos((combosData.combos || []).filter(c => !c.kind || c.kind === "llm"));`;
+    const newFilterCombos = `if (combosRes.ok) setCombos((combosData.combos || []).filter(c => c && (!c.kind || c.kind === "llm")).map(c => ({ ...c, models: Array.isArray(c.models) ? c.models : [] })));`;
+    if (pageSrc.includes(oldFilterCombos)) {
+      pageSrc = pageSrc.replace(oldFilterCombos, newFilterCombos);
+    }
+
+    // Harden ComboCard safe models slicing & length checks
+    pageSrc = pageSrc.replace(
+      /combo\.models\.length === 0/g,
+      "(!combo.models || combo.models.length === 0)"
+    );
+    pageSrc = pageSrc.replace(
+      /combo\.models\.length > 3/g,
+      "(combo.models && combo.models.length > 3)"
+    );
+    pageSrc = pageSrc.replace(
+      /combo\.models\.slice\(0, 3\)\.map/g,
+      "(combo.models || []).slice(0, 3).map"
+    );
+    pageSrc = pageSrc.replace(
+      /\`Auto — \$\{combo\.models\[0\] \|\| "first model"\}\`/g,
+      '`Auto — ${(combo.models && combo.models[0]) || "first model"}`'
+    );
+
+    // Safeguard CapacityAdapterCap model normalization: ensure model string when mapped
+    const oldCapModelMap = `models.slice(0, 3).map((model, index) => (`;
+    const newCapModelMap = `models.slice(0, 3).map((mItem, index) => {
+                  const model = typeof mItem === "string" ? mItem : (mItem?.model || mItem?.value || String(mItem || ""));
+                  return (`;
+    if (pageSrc.includes(oldCapModelMap)) {
+      pageSrc = pageSrc.replace(oldCapModelMap, newCapModelMap);
+      pageSrc = pageSrc.replace(
+        `                      <span className="material-symbols-outlined text-[12px]">close</span>
+                    </button>
+                  </code>
+                ))`,
+        `                      <span className="material-symbols-outlined text-[12px]">close</span>
+                    </button>
+                  </code>
+                ); })`
+      );
+    }
+
+    fs.writeFileSync(comboPagePath, pageSrc, "utf8");
+    console.log(`[Patch] Hardened dashboard/combos/page.js!`);
+  }
 
   // 11. Configure No-Auth Providers in Registry (opencode, theoldllm, uncloseai, duckduckgo-web, felo-web, mimo-free)
   const noAuthUpdates = {

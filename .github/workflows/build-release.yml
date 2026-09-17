@@ -142,8 +142,8 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.39
-          name: "9router Magisk Module v0.5.39 (Purged Build Junk & Ultra-Lite)"
+          tag_name: v0.5.40
+          name: "9router Magisk Module v0.5.40 (Fix Combos & Model Capabilities)"
           body: |
             ## 9router Magisk Module v0.5.39 (Cleaned & Optimized)
             - **🧹 Aggressive Build Junk Purge**:
