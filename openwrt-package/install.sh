@@ -122,14 +122,19 @@ else
     echo "  -> Downloading latest 9router core bundle from GitHub Releases..."
     TAR_URL="https://github.com/Aydin04/9router-magisk/releases/latest/download/9router-openwrt.tar.gz"
     wget -qO /tmp/9router-openwrt.tar.gz "$TAR_URL" || curl -sL -o /tmp/9router-openwrt.tar.gz "$TAR_URL"
-    tar -xzf /tmp/9router-openwrt.tar.gz -C "$INSTALL_DIR/"
+    # The release archive has full root tree layout (./usr/share/9router, ./etc, ./luci-app-9router, etc.)
+    tar -xzf /tmp/9router-openwrt.tar.gz -C /
     rm -f /tmp/9router-openwrt.tar.gz
 fi
 
-# Ensure correct tree layout
+# Ensure correct tree layout if someone extracted locally into /usr/share/9router
+if [ -d "$INSTALL_DIR/usr/share/9router" ]; then
+    cp -rf "$INSTALL_DIR/usr/share/9router/"* "$INSTALL_DIR/" 2>/dev/null || true
+    rm -rf "$INSTALL_DIR/usr" 2>/dev/null || true
+fi
 if [ -d "$INSTALL_DIR/9router" ]; then
-    cp -rf "$INSTALL_DIR/9router/"* "$INSTALL_DIR/"
-    rm -rf "$INSTALL_DIR/9router"
+    cp -rf "$INSTALL_DIR/9router/"* "$INSTALL_DIR/" 2>/dev/null || true
+    rm -rf "$INSTALL_DIR/9router" 2>/dev/null || true
 fi
 
 # 4. Install Config and Service
@@ -164,6 +169,7 @@ USE_PROCD=1
 
 PROG_DIR="/usr/share/9router"
 DATA_DIR="/etc/9router-data"
+LOG_FILE="/var/log/9router.log"
 
 start_service() {
     config_load 9router
@@ -181,10 +187,18 @@ start_service() {
 
     [ "$enabled" -eq 1 ] || return 0
 
-    local NODE_BIN="$(which node)"
+    local NODE_BIN=""
+    if [ -x "$PROG_DIR/bin/node" ]; then
+        NODE_BIN="$PROG_DIR/bin/node"
+    elif [ -x "/usr/bin/node" ]; then
+        NODE_BIN="/usr/bin/node"
+    elif which node >/dev/null 2>&1; then
+        NODE_BIN="$(which node)"
+    fi
+
     [ -z "$NODE_BIN" ] && return 1
 
-    mkdir -p "$cfg_data_dir" "$cfg_data_dir/tmp"
+    mkdir -p "$cfg_data_dir" "$cfg_data_dir/tmp" /var/log
 
     procd_open_instance "9router"
     procd_set_param command "$NODE_BIN" \
@@ -196,6 +210,7 @@ start_service() {
     procd_set_param respawn 3600 5 0
     procd_set_param stdout 1
     procd_set_param stderr 1
+    procd_set_param file "$LOG_FILE"
 
     procd_set_param env PORT="$port"
     procd_set_param env HOST="$bind_host"
@@ -239,12 +254,17 @@ chmod -R 0755 "$INSTALL_DIR"
 
 # 5. Install LuCI App (Dashboard & Settings inside LuCI)
 echo "[5/6] Installing LuCI App (luci-app-9router)..."
-if [ -d "$SCRIPT_DIR/luci-app-9router" ]; then
+if [ -d "/luci-app-9router" ]; then
+    cp -rf /luci-app-9router/root/* / 2>/dev/null || true
+    cp -rf /luci-app-9router/htdocs/* /www/ 2>/dev/null || true
+    rm -rf /luci-app-9router 2>/dev/null || true
+elif [ -d "$SCRIPT_DIR/luci-app-9router" ]; then
     cp -rf "$SCRIPT_DIR/luci-app-9router/root/"* / 2>/dev/null || true
     cp -rf "$SCRIPT_DIR/luci-app-9router/htdocs/"* /www/ 2>/dev/null || true
 elif [ -d "$INSTALL_DIR/luci-app-9router" ]; then
     cp -rf "$INSTALL_DIR/luci-app-9router/root/"* / 2>/dev/null || true
     cp -rf "$INSTALL_DIR/luci-app-9router/htdocs/"* /www/ 2>/dev/null || true
+    rm -rf "$INSTALL_DIR/luci-app-9router" 2>/dev/null || true
 fi
 
 # Reload LuCI and RPCD ACLs
