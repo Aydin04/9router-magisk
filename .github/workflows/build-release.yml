@@ -158,8 +158,11 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.47
-          name: "9router v0.5.47 (OpenWrt Support & Magisk Universal Provider Port)"
+          tag_name: v0.5.48
+          name: "9router v0.5.48 (OpenWrt Root Bundle & Live Logs)"
+          draft: false
+          prerelease: false
+          make_latest: true
           body: |
             ## 9router v0.5.47
             - **Official OpenWrt Support**:
