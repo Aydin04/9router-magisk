@@ -3,5 +3,5 @@ name=9router AI Gateway Magisk Module
 author=Aydin04
 description=Run Ultra-Lite 9router AI Gateway background service on Android with ~75MB low-RAM limits, 385+ providers, RTK compression, and Standalone Control Center on port 20129.
 updateJson=https://raw.githubusercontent.com/Aydin04/9router-magisk/main/magisk-module/update.json
-version=v0.5.48
-versionCode=548
+version=v0.5.49
+versionCode=549

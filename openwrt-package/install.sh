@@ -108,7 +108,23 @@ echo "  -> Node.js ready ($NODE_BIN): $NODE_VERSION"
 echo "[2/5] Creating directories..."
 INSTALL_DIR="/usr/share/9router"
 DATA_DIR="/etc/9router-data"
-mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$DATA_DIR/tmp"
+mkdir -p "$INSTALL_DIR" "$DATA_DIR" "$DATA_DIR/tmp" /var/log \
+         /etc/config /etc/init.d /usr/bin \
+         /www/luci-static/resources/view/9router \
+         /usr/share/luci/menu.d \
+         /usr/share/rpcd/acl.d
+
+# Pre-create known provider/submodule subdirectories so BusyBox tar NEVER fails with 'Cannot mkdir'
+mkdir -p "$INSTALL_DIR/open-sse/providers/registry" \
+         "$INSTALL_DIR/open-sse/shared" \
+         "$INSTALL_DIR/open-sse/handlers" \
+         "$INSTALL_DIR/open-sse/rtk" \
+         "$INSTALL_DIR/open-sse/utils" \
+         "$INSTALL_DIR/open-sse/config" \
+         "$INSTALL_DIR/open-sse/executors" \
+         "$INSTALL_DIR/.next" \
+         "$INSTALL_DIR/public" \
+         "$INSTALL_DIR/bin"
 
 # 3. Extract 9router Core
 echo "[3/5] Installing 9router core bundle..."
@@ -119,11 +135,12 @@ if [ -f "$SCRIPT_DIR/9router.tar.gz" ]; then
 elif [ -f "/tmp/9router.tar.gz" ]; then
     tar -xzf "/tmp/9router.tar.gz" -C "$INSTALL_DIR/"
 else
-    echo "  -> Downloading latest 9router core bundle from GitHub Releases..."
+    echo "  -> Downloading latest 9router OpenWrt bundle from GitHub Releases..."
     TAR_URL="https://github.com/Aydin04/9router-magisk/releases/latest/download/9router-openwrt.tar.gz"
     wget -qO /tmp/9router-openwrt.tar.gz "$TAR_URL" || curl -sL -o /tmp/9router-openwrt.tar.gz "$TAR_URL"
-    # The release archive has full root tree layout (./usr/share/9router, ./etc, ./luci-app-9router, etc.)
-    tar -xzf /tmp/9router-openwrt.tar.gz -C /
+    
+    # Extract bundle into root (works with GNU tar and Busybox tar)
+    tar -xzf /tmp/9router-openwrt.tar.gz -C / 2>/dev/null || tar -xvf /tmp/9router-openwrt.tar.gz -C /
     rm -f /tmp/9router-openwrt.tar.gz
 fi
 

@@ -121,7 +121,7 @@ jobs:
           chmod +x dist/openwrt-bundle/etc/init.d/9router dist/openwrt-bundle/install.sh
 
           cd dist/openwrt-bundle
-          tar -czf ../9router-openwrt.tar.gz .
+          tar -czf ../9router-openwrt.tar.gz usr etc luci-app-9router install.sh
           cd ../..
           ls -lh dist/9router-openwrt.tar.gz
 
@@ -158,15 +158,19 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v0.5.48
-          name: "9router v0.5.48 (OpenWrt Root Bundle & Live Logs)"
+          tag_name: v0.5.49
+          name: "9router v0.5.49 (OpenWrt BusyBox Tar Fix & Clean LuCI Logs)"
           draft: false
           prerelease: false
           make_latest: true
           body: |
-            ## 9router v0.5.47
+            ## 9router v0.5.49
+            - **OpenWrt BusyBox Tar Compatibility**:
+              - Fixed `tar: ./usr/share/9router/open-sse/providers: Cannot mkdir` on BusyBox OpenWrt systems.
+              - Pre-creates nested subdirectories before extracting and bundles archive without `./` prefix.
+            ## 9router v0.5.48
             - **Official OpenWrt Support**:
-              - Added dedicated OpenWrt bundle `9router-openwrt.tar.gz`.
+              - Dedicated OpenWrt bundle `9router-openwrt.tar.gz` and LuCI native app (`luci-app-9router`).
               - Native OpenWrt `procd` init script (`/etc/init.d/9router`) with automatic process supervision, respawn, and reload triggers.
               - Unified UCI configuration (`/etc/config/9router`) supporting `port`, `bind_host`, `require_auth`, `api_key`, `admin_password`, and `ram_limit`.
               - 1-Click install script (`install.sh`) supporting instant setup on OpenWrt (x86_64, aarch64, arm, mips).
